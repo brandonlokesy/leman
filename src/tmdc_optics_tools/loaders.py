@@ -5609,6 +5609,47 @@ class SingleSpectrum:
 # RamanSpectrum
 # ---------------------------------------------------------------------------
 
+#: Tail shared by both of :class:`RamanSpectrum`'s refusals, which are reached by
+#: different routes -- one before the parse and one after -- and must not drift
+#: apart in what they tell the caller to do instead.
+_RAMAN_MAP_ADVICE = (
+    "A spatial-map export (X, Y, then one counts column per shift) is a "
+    "different shape -- use RamanMap for that file."
+)
+
+
+def _labram_field_count(path) -> int:
+    """
+    Count the tab-separated fields on the **first data line** of *path*.
+
+    A LabRAM body follows a ``#``-prefixed header of no fixed length, and its
+    two shapes are told apart by width: a single spectrum's rows carry 2 fields,
+    a spatial map's carry ``n_shift + 2``.  Reading one line keeps this usable
+    as a classifier on a file of any size.
+
+    Parameters
+    ----------
+    path : str or Path
+
+    Returns
+    -------
+    int
+        Fields on the first line that is neither blank nor ``#``-prefixed; ``0``
+        if the file has no such line.  A body written with spaces rather than
+        tabs counts as 1, so only a count **above 2** is evidence of a map.
+
+    See Also
+    --------
+    _n_rows_upto : the other bounded peek, counting rows rather than fields.
+    """
+    with open(path, encoding="latin-1") as fh:
+        for line in fh:
+            if line.startswith("#") or not line.strip():
+                continue
+            return len(line.rstrip("\n").split("\t"))
+    return 0
+
+
 class RamanSpectrum:
     """
     Single Raman spectrum loaded from a LabRAM-style ``.txt`` export.
@@ -5650,10 +5691,30 @@ class RamanSpectrum:
     (X, Y, spectrum) rows) is a different export shape and needs
     :class:`RamanMap`; this class raises rather than misreading one as a
     lone spectrum.
+
+    Raises
+    ------
+    ValueError
+        If the body is wider than two columns — a spatial-map export, named
+        as such and pointed at :class:`RamanMap`. Checked both before the
+        parse, from the first data line's field count, and after it from the
+        array's shape, because a map's own first row is unreadable by the
+        parser.
     """
 
     def __init__(self, path: str):
         self.path = str(path)
+
+        # Identified before it is parsed. A map export's first row carries two
+        # *empty* leading tab fields, which the default whitespace delimiter
+        # collapses, so np.loadtxt sees 1024 columns against row 1's 1026 and
+        # raises its own error before the shape check below can name RamanMap.
+        n_fields = _labram_field_count(path)
+        if n_fields > 2:
+            raise ValueError(
+                f"'{path}' has {n_fields} tab-separated fields on its first "
+                f"data line, not 2 (Raman shift, counts). " + _RAMAN_MAP_ADVICE
+            )
 
         arr = np.loadtxt(path, comments="#", encoding="latin-1")
         if arr.ndim == 1:
@@ -5661,9 +5722,7 @@ class RamanSpectrum:
         if arr.ndim != 2 or arr.shape[1] != 2:
             raise ValueError(
                 f"Expected 2 columns (Raman shift, counts), got array of "
-                f"shape {arr.shape} from '{path}'. A wider array is likely a "
-                f"spatial-map export (X, Y, then one counts column per "
-                f"shift) -- use RamanMap for that shape."
+                f"shape {arr.shape} from '{path}'. " + _RAMAN_MAP_ADVICE
             )
 
         self.shift  = arr[:, 0]

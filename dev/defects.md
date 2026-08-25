@@ -44,9 +44,10 @@ below tracks what is left.
 change aimed at it; **A6 fixed 2026-07-30**; **A8 fixed 2026-08-06**
 with E14; **A10 and A7 fixed 2026-08-07**; **A9 and B1 both fixed 2026-08-10**, which
 closes the `AttoCubePLScanRealSpace` pass; **A19–A21 fixed 2026-08-17/18** on
-`fix/nest-level-separation`; **A23 fixed 2026-08-18**; **A25 fixed 2026-08-25**.
+`fix/nest-level-separation`; **A23 fixed 2026-08-18**; **A25 and A29 fixed
+2026-08-25**, the two Raman-loader entries, taken as two changes.
 **A18** and **A22** are the live bugs left in this section, joined by **A24** and
-**A26–A29** from the PR #19 review.)*
+**A26–A28** from the PR #19 review.)*
 
 **A1. `processing.remove_cosmic_rays` cannot be called at all.** **[FIXED — 2026-07-28, e77fabf]**
 `remove_cosmic_rays`'s replacement loop referenced `cosmic_mask`, which was never defined — the
@@ -1262,7 +1263,8 @@ should not survive normalisation, wrong when the floor is signal — but it is a
 quantity under an unchanged argument name, so a figure made with `normalize=True` before
 and after does not show the same numbers.
 
-**A29. `RamanSpectrum` dies before it can refuse a map export.** **[verified by running]**
+**A29. `RamanSpectrum` dies before it can refuse a map export.**
+**[FIXED — 2026-08-25]** **[verified by running]**
 `RamanSpectrum` carries a message telling a caller to use `RamanMap` for a map-shaped
 file, and cannot reach it: `np.loadtxt` raises first. On the committed
 `examples/data/Raman/map2.txt`:
@@ -1276,6 +1278,45 @@ tab-separated fields, but row 0's first two are *empty*, and `loadtxt`'s default
 whitespace delimiter collapses them away, so row 0 reads as 1024 columns against row 1's
 1026. Classifying the file before parsing it, or reading with an explicit tab delimiter,
 would let the written message do its job.
+
+*Fixed by classifying before parsing.* `_labram_field_count` — a bounded peek beside
+`RamanSpectrum`, in the shape of `_n_rows_upto` and `_classify_csv` — returns the
+tab-separated field count of the file's first data line, and more than 2 is refused naming
+`RamanMap`. Measured on the committed files: a single spectrum reads 2, `map2.txt` reads
+1026.
+
+**The explicit tab delimiter the sketch offered as an alternative does not work.** It
+fixes the ragged read, and then `np.loadtxt(delimiter="\t")` fails converting row 0's two
+*empty* leading fields to float — a different error that still does not name `RamanMap`,
+and one that would change how every single-spectrum file is parsed on the way. The file
+has to be identified before it is read, not read more carefully.
+
+**Both refusals are kept, and both are reachable.** The pre-parse count catches a
+tab-separated map; the post-parse shape check catches a map-shaped body written with
+*spaces*, where tab-splitting the first line returns 1 and the new guard correctly stands
+aside. That asymmetry is also why the threshold is `> 2` rather than `!= 2`: a
+space-separated single spectrum counts 1 and must pass through untouched. The shared tail
+of the two messages is one constant, `_RAMAN_MAP_ADVICE`, so the two routes cannot drift
+apart in what they tell the caller to do.
+
+*Test:* `tests/test_raman.py`, 2 new cases and one tightened (11 → 13).
+
+`test_map_export_is_rejected_not_misread` **already existed and passed against the
+defect** — it asserted a bare `pytest.raises(ValueError)`, which numpy's own *"the number
+of columns changed from 1024 to 1026 at row 2"* satisfies just as well as the message the
+class was trying to give. Now matched on `use RamanMap`, and it fails against the pre-fix
+code. Worth keeping as the lesson: an unqualified `raises(ValueError)` on a file that has
+two ways to fail tests only that it failed.
+
+The synthetic ragged-first-row case matches on `fields on its first data line`, wording
+only the pre-parse guard uses, so the two routes are told apart rather than both being
+accepted as "it raised". The space-separated case is the did-not-regress half, and exists
+so the post-parse check cannot quietly become unreachable.
+
+Adjacent, found while writing them: `test_extra_columns_raise_a_clear_error` is
+tab-separated, so it now takes the **pre-parse** route rather than the shape check it was
+written for. Left as it is — it asserts the caller-visible outcome, which is unchanged —
+with the new pair carrying the route-level claims.
 
 **A30. `plot_spectral_map(rescale_img=True)` blanks the whole panel on one `NaN`.**
 **[FIXED — 2026-08-21]** **[verified by running]**
@@ -2727,7 +2768,8 @@ deprecation cost — which is the argument for taking them now rather than later
    written-flag grid, so the message can name the repeated coordinate.
 3. **A26** and **A29** — two crashes, each with an obvious fix, neither needing a
    judgment call. A26 matters most in a map loop, where one weak pixel currently ends the
-   run.
+   run. **A29 fixed 2026-08-25**, and the sketch's second option (an explicit tab
+   delimiter) turned out not to fix it; **A26** is still owed.
 4. **A27** with **E21** — a default that forces smoothing on, and three returns that hand
    back no artists. Different faults, but the same new public surface, and both are
    cheapest to change before anything depends on the current shapes. E21 also touches
@@ -2762,7 +2804,8 @@ values that are not measurements — and it rides along with whatever next touch
 `plot_spectral_map`'s rescale path. **Fixed the same day**, on its own rather than as a
 passenger: it was the cheapest open entry in the file, the fix already existed in
 `plot_image`, and the test already existed for `plot_image` to be modelled on. **A25** was
-the cheapest one left after it, and was fixed on 2026-08-25.
+the cheapest one left after it, and was fixed on 2026-08-25 along with **A29** — the two
+Raman-loader entries, taken as two changes. **A26** is the cheapest one left now.
 
 Outside this order: **E9 is largely closed** — sample files arrived, and R/RC and
 TRPL support landed on 2026-07-30 along with the rename and arbitrary-sweep rewrite
