@@ -330,8 +330,6 @@ bwarea semantics are wanted at all.
   early. Nothing tests this path. **A24** — fix before trusting any `tau_rise` or
   `tau_decay`, and correct `_build_lifetime_dictionary`'s docstring, which claims the
   opposite, in the same change.
-- `RamanMap` fills `counts` with `np.empty`, so a duplicated `(X, Y)` leaves a cell
-  holding uninitialised memory that then plots as data (**A25**).
 - `plot_diffusion_cloud` has ~30 parameters and returns `result` instead of its artists
   — the standing counter-example to *parameters earn their place*. New code must not
   copy it. (Its double-subtraction of the background is fixed; see **A5**.)

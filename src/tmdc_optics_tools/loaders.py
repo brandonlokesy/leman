@@ -5723,7 +5723,9 @@ class RamanMap:
     ValueError
         If the number of spectra rows does not equal ``len(x) * len(y)``
         exactly — an aborted or ragged scan, which this class does not try
-        to reshape partially.
+        to reshape partially. Also if two rows carry the same ``(X, Y)``,
+        which the row count alone cannot detect and which would leave one
+        grid position unmeasured.
     """
 
     def __init__(self, path: str):
@@ -5762,7 +5764,32 @@ class RamanMap:
         # correctly.
         ix = np.searchsorted(self.x, xy[:, 0])
         iy = np.searchsorted(self.y, xy[:, 1])
-        self.counts = np.empty((n_y, n_x, n_shift))
+
+        # (n_y * n_x,) — how many rows landed in each grid cell, counted on the
+        # flattened index iy * n_x + ix.  The row-count guard above cannot see a
+        # repeated position: it overwrites one cell and leaves another
+        # unmeasured, so the total still comes out right.
+        per_cell = np.bincount(iy * n_x + ix, minlength=n_y * n_x)
+        if per_cell.max() > 1:
+            # The (X, Y) of every over-filled cell, in µm.  Named rather than
+            # counted, because the coordinate is what identifies the cause.
+            repeated = ", ".join(
+                f"({self.x[cell % n_x]:g}, {self.y[cell // n_x]:g})"
+                for cell in np.flatnonzero(per_cell > 1)
+            )
+            raise ValueError(
+                f"'{path}' repeats scan position(s) {repeated} µm -- the row "
+                f"count matches {n_x} unique X x {n_y} unique Y, but a repeated "
+                f"position overwrites one grid cell and leaves another "
+                f"unmeasured. Two acquisitions copied into one file, or a "
+                f"partly copied scan; read the file's own rows directly if you "
+                f"need them."
+            )
+
+        # NaN rather than np.empty: every cell is written on the path that gets
+        # here, and a cell left unwritten by some later change reads as absent
+        # rather than as whatever was in memory.
+        self.counts = np.full((n_y, n_x, n_shift), np.nan)
         self.counts[iy, ix, :] = counts_flat
 
     @property

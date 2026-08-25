@@ -44,8 +44,9 @@ below tracks what is left.
 change aimed at it; **A6 fixed 2026-07-30**; **A8 fixed 2026-08-06**
 with E14; **A10 and A7 fixed 2026-08-07**; **A9 and B1 both fixed 2026-08-10**, which
 closes the `AttoCubePLScanRealSpace` pass; **A19–A21 fixed 2026-08-17/18** on
-`fix/nest-level-separation`; **A23 fixed 2026-08-18**. **A18** and **A22** are the
-live bugs left in this section, joined by **A24–A29** from the PR #19 review.)*
+`fix/nest-level-separation`; **A23 fixed 2026-08-18**; **A25 fixed 2026-08-25**.
+**A18** and **A22** are the live bugs left in this section, joined by **A24** and
+**A26–A29** from the PR #19 review.)*
 
 **A1. `processing.remove_cosmic_rays` cannot be called at all.** **[FIXED — 2026-07-28, e77fabf]**
 `remove_cosmic_rays`'s replacement loop referenced `cosmic_mask`, which was never defined — the
@@ -1185,12 +1186,52 @@ test reaches `build_irf_kernel`, `fit_sparse_lifetime` or `fit_scan_lifetime`, w
 why this survived.
 
 **A25. `RamanMap` can plot uninitialised memory as data.**
+**[FIXED — 2026-08-25]** **[verified by running]**
 `RamanMap.__init__` allocates `self.counts` with `np.empty` and scatters rows into it by
 `searchsorted` index. Its guard compares `n_x * n_y` against the row count, which a file
 with a duplicated `(X, Y)` position can still satisfy — the duplicate overwrites one cell
 and leaves another never written, holding whatever was in memory. That cell then reaches
 `plot_image` and a mode fit as though it were a measurement. `np.full(..., np.nan)` plus a
 check that every cell was written would fail loudly instead.
+
+*Fixed as sketched*, with the check asked in terms of the cause rather than the symptom:
+`np.bincount(iy * n_x + ix, minlength=n_y * n_x)` counts the rows landing in each grid
+cell, and more than one in any cell is refused. "Every cell was written" and "no position
+repeats" are the same condition once the row count matches, so one array answers both, and
+the count is what lets the message name the offending coordinate.
+
+**It refuses rather than warns**, which is the opposite of what **A12** did for a duplicate
+`_iter_N` index, and the difference is what is left in the caller's hands. There, every
+file was present and unmodified, so a warning let the researcher narrow the prefix and
+nothing was decided on their behalf. Here, continuing means handing back an array with a
+position in it that was never measured — there is no version of that the caller can act on
+downstream, and the guard immediately above in the same function already refuses an
+incomplete grid for the same reason. No winner is picked among the duplicate rows; that
+would be the `_iter_N` decision CLAUDE.md forbids.
+
+The message **names the repeated `(X, Y)` in µm** rather than counting the collisions,
+following `_order_by_iter`'s wording under A12: the coordinate is what identifies the cause,
+which is two acquisitions copied into one file, or a partly copied scan.
+
+**`np.full(..., np.nan)` stays even though the check now raises.** The check covers the one
+known route to an unwritten cell; the fill means any later change to the scatter indices
+shows an unwritten cell as absent rather than as memory contents. One line, and it is the
+half of the sketch that does not depend on having predicted the cause correctly.
+
+*Test:* `tests/test_raman_map.py`, 3 new cases (10 → 13). The duplicate fixture repeats the
+first position in place of the last, so 3 unique X × 2 unique Y still equals 6 rows and the
+complete-grid guard passes — the defect exactly. It fails against the pre-fix code with
+`DID NOT RAISE`.
+
+The two "no cell unwritten" cases pass either way, and that is the finding worth keeping:
+under `np.empty` the never-written cell held **finite** garbage, so `np.isfinite(...).all()`
+was true against the broken code. A NaN-only assertion would therefore have tested nothing
+— the same hazard as **A3**, where every case rendered because `set_path_effects` accepts
+anything. They are the did-not-regress half, pinning that the fill has not started leaving
+real holes; the refusal is what pins the bug.
+
+Verified on the real map: `examples/data/Raman/map2.txt` still loads 10 × 8 × 1024 with both
+hand-parsed spot values unchanged, so the new check does not refuse a good file.
 
 **A26. `locate_residual_peak` can seed an amplitude below its own bound, and the crash is
 not caught.**
@@ -2681,7 +2722,9 @@ deprecation cost — which is the argument for taking them now rather than later
    outputs already carry them, and it needs the first test to reach `fit_sparse_lifetime`
    at all. The docstring's contrary claim is corrected in the same change.
 2. **A25** — same class as A24 (wrong data, no error raised) and much cheaper:
-   `np.full(..., np.nan)` plus a check that every grid cell was written.
+   `np.full(..., np.nan)` plus a check that every grid cell was written. **Fixed
+   2026-08-25**, and the check went in as a per-cell row count rather than a
+   written-flag grid, so the message can name the repeated coordinate.
 3. **A26** and **A29** — two crashes, each with an obvious fix, neither needing a
    judgment call. A26 matters most in a map loop, where one weak pixel currently ends the
    run.
@@ -2718,8 +2761,8 @@ scikit-learn 1.9.0 with it; the suite is 917 passed, 0 failed, and
 values that are not measurements — and it rides along with whatever next touches
 `plot_spectral_map`'s rescale path. **Fixed the same day**, on its own rather than as a
 passenger: it was the cheapest open entry in the file, the fix already existed in
-`plot_image`, and the test already existed for `plot_image` to be modelled on. **A25** is
-now the cheapest one left.
+`plot_image`, and the test already existed for `plot_image` to be modelled on. **A25** was
+the cheapest one left after it, and was fixed on 2026-08-25.
 
 Outside this order: **E9 is largely closed** — sample files arrived, and R/RC and
 TRPL support landed on 2026-07-30 along with the rename and arbitrary-sweep rewrite

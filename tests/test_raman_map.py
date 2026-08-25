@@ -4,7 +4,8 @@ Tests for RamanMap.
 The real map (examples/data/Raman/map2.txt) is a 10 x 8 grid, Y fast/inner
 and X slow/outer -- confirmed by reading its rows, not assumed. Synthetic
 files here cover shuffled row order (RamanMap indexes by each row's own
-(X, Y), not file position) and an incomplete/aborted grid.
+(X, Y), not file position), an incomplete/aborted grid, and a repeated
+position, which the row count alone cannot detect.
 """
 
 import numpy as np
@@ -17,11 +18,17 @@ from _paths import DATA
 MAP_PATH = str(DATA / "Raman" / "map2.txt")
 
 
-def _write_map(path, xs, ys, shift, counts_fn, shuffle=False, drop_last=False):
+def _write_map(path, xs, ys, shift, counts_fn, shuffle=False, drop_last=False,
+               duplicate=False):
     """
     counts_fn(x, y) -> 1-D array of length len(shift), the spectrum at (x, y).
     """
     rows = [(x, y) for x in xs for y in ys]  # X outer, Y inner, as in the real export
+    if duplicate:
+        # Repeat the first position in place of the last. The row count and both
+        # unique-axis counts are unchanged, so the complete-grid guard still
+        # passes -- while one cell gets two rows and one gets none.
+        rows[-1] = rows[0]
     if shuffle:
         rng = np.random.default_rng(0)
         rows = [rows[i] for i in rng.permutation(len(rows))]
@@ -95,6 +102,27 @@ def test_incomplete_grid_raises(tmp_path):
         RamanMap(path)
 
 
+def test_duplicate_scan_position_is_refused_and_named(tmp_path):
+    # XS x YS = 6 cells and the file still has 6 rows, so the complete-grid
+    # guard passes: (0.0, 0.0) is written twice and (2.0, 1.0) never. Before
+    # the position check, that cell held uninitialised memory and plotted as
+    # data.
+    path = tmp_path / "map.txt"
+    _write_map(path, XS, YS, SHIFT, _counts_fn, duplicate=True)
+    with pytest.raises(ValueError, match=r"repeats scan position.*\(0, 0\)"):
+        RamanMap(path)
+
+
+def test_a_complete_grid_leaves_no_cell_unwritten(tmp_path):
+    # counts is NaN-filled before the rows are scattered in, so a cell nothing
+    # wrote reads as absent. On a complete grid nothing may be NaN -- shuffled,
+    # because that is the path where the scatter indices do the real work.
+    path = tmp_path / "map.txt"
+    _write_map(path, XS, YS, SHIFT, _counts_fn, shuffle=True)
+    m = RamanMap(path)
+    assert np.isfinite(m.counts).all()
+
+
 def test_no_data_rows_raises(tmp_path):
     path = tmp_path / "map.txt"
     path.write_text("#Acq. time (s)=\t3\n")
@@ -115,6 +143,11 @@ def test_real_map_shape_and_units():
     assert m.y.min() == pytest.approx(0.08981, abs=1e-3)
     assert m.y.max() == pytest.approx(14.7288, abs=1e-3)
     assert m.shift.size == 1024
+
+
+def test_real_map_leaves_no_cell_unwritten():
+    m = RamanMap(MAP_PATH)
+    assert np.isfinite(m.counts).all()
 
 
 def test_real_map_spot_checks_against_hand_parsed_rows():
