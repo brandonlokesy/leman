@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from tmdc_optics_tools import hdf5
 from tmdc_optics_tools.loaders import AttoCubeSpectralSweep, AttoCubeTRPLSweep
 
 from _paths import DATA
@@ -96,6 +97,28 @@ def test_the_spectral_and_temporal_surfaces_stay_distinct():
     )
     assert "spectra" not in dir(AttoCubeTRPLSweep)
     assert "decays" not in dir(AttoCubeSpectralSweep)
+
+
+# --- Which arrays an archive carries ---------------------------------------
+
+def test_the_signal_datasets_come_from_the_class_not_the_layout():
+    # Two instruments can share a wavelength axis and still write a different
+    # number of signal arrays, so `_LAYOUT_KIND == "spectral"` is not a valid
+    # test for "carries two regions of interest".
+    assert AttoCubeSpectralSweep._HDF5_SIGNALS == (
+        ("roi1", "spectra_roi1"), ("roi2", "spectra_roi2"))
+    assert AttoCubeTRPLSweep._HDF5_SIGNALS == (("counts", "decays"),)
+
+
+def test_an_undeclared_signal_table_is_refused_by_name():
+    # Reached, not merely written: a refusal nothing can trigger is the defect
+    # A29 records. A class that inherits the empty default must say so rather
+    # than write an archive with no signal in it.
+    class _Undeclared:
+        _HDF5_SIGNALS = ()
+
+    with pytest.raises(NotImplementedError, match="_Undeclared declares no"):
+        hdf5._signal_arrays(_Undeclared())
 
 
 # --- Where a warning is blamed ---------------------------------------------

@@ -1721,6 +1721,13 @@ class _Sweep:
     _AXIS_ATTR   = None     # attribute holding the (n_points,) axis
     _SIGNAL_ATTR = None     # attribute holding the (n_points, n_sweeps) signal
 
+    # Which arrays an HDF5 archive must carry, as (dataset name, the attribute
+    # holding it).  Declared per class rather than derived from the axis — two
+    # instruments can share a wavelength axis and still write a different number
+    # of signal arrays, so reading it off ``_LAYOUT_KIND`` would silently store
+    # the wrong datasets for the second one.
+    _HDF5_SIGNALS = ()
+
     # No nest until one is declared, so a subclass that never calls
     # _bind_nesting still answers is_nested.
     _nesting = None
@@ -4862,6 +4869,10 @@ class AttoCubeSpectralSweep(_SpectralSweep):
     _CURATED         = _ATTOCUBE_CURATED
     _SIBLING_CURRENT = _ATTOCUBE_SIBLING_CURRENT
 
+    # Both ROIs, because ExpROI2 is where a two-spot galvo scan's remote spot
+    # lives and discarding it would make the archive lossy.
+    _HDF5_SIGNALS = (("roi1", "spectra_roi1"), ("roi2", "spectra_roi2"))
+
     def __init__(
         self,
         path           : str,
@@ -5294,6 +5305,9 @@ class AttoCubeTRPLSweep(_Sweep):
     _AXIS_ATTR   = "time"
     _SIGNAL_ATTR = "decays"
     _POINT_NOUN  = "time bins"
+
+    # One decay per sweep point; there are no ROIs on this axis.
+    _HDF5_SIGNALS = (("counts", "decays"),)
 
     # Picoharp channels, relevant to normalising decay counts.  Units unconfirmed
     # — the same standing question as Scanner X/Y and power_scale.

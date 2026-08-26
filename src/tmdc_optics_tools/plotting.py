@@ -3208,6 +3208,7 @@ def animate_wl_pl_spectra(
         AttoCubePLScanRealSpace,
         AttoCubeSpectralSweep,
         AttoCubeLaserReferenceImage,
+        _SpectralSweep,
     )
 
     # Resolve the shared laser reference (path -> loader, object -> as-is).
@@ -3227,9 +3228,12 @@ def animate_wl_pl_spectra(
         )
 
     def _spectrum_scan(spec):
-        # isinstance on the base class also accepts the deprecated
-        # AttoCubePLVabScan, which is a subclass of it.
-        if spec is None or isinstance(spec, AttoCubeSpectralSweep):
+        # Any sweep of spectra, from any instrument, and so also the
+        # deprecated AttoCubePLVabScan.  Tested against the shared base
+        # rather than one instrument's class, because the alternative —
+        # treating an unrecognised scan as a path and calling str() on it
+        # — fails somewhere far less obvious.
+        if spec is None or isinstance(spec, _SpectralSweep):
             return spec
         # A bare path: this function animates PL, so declare it rather than
         # letting the loader guess.  Pass a pre-built sweep for anything else.

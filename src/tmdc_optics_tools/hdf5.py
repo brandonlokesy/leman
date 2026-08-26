@@ -351,8 +351,18 @@ def write_sweep(
 
         # Provenance of the writing session's loading choices — recorded, and
         # deliberately not replayed on read.  See the module docstring.
-        if scan._LAYOUT_KIND == "spectral":
-            meta.attrs["roi"]            = int(scan.roi)
+        #
+        # Tested by what the object *is*, not by which export layout it reads:
+        # the correction ladder below belongs to every sweep of spectra, so a
+        # second spectral instrument must reach it rather than fall through to
+        # the temporal branch.
+        from .loaders import _SpectralSweep   # local: avoids an import cycle
+        if isinstance(scan, _SpectralSweep):
+            # Not universal among spectral sweeps: a region-of-interest
+            # selection exists only where the instrument writes more than one.
+            roi = getattr(scan, "roi", None)
+            if roi is not None:
+                meta.attrs["roi"] = int(roi)
             meta.attrs["apply_jacobian"] = bool(scan.apply_jacobian)
             # The declaration, not the repaired array: `spectra` is written as the
             # source file had it, so a reader that wants the repair asks for it.
@@ -426,12 +436,21 @@ def write_sweep(
 
 
 def _signal_arrays(scan) -> list:
-    """The signal datasets to store, as ``(name, array)`` pairs."""
-    if scan._LAYOUT_KIND == "spectral":
-        # Both ROIs: ExpROI2 is where a two-spot galvo scan's remote spot lives,
-        # so discarding it would make the archive lossy.
-        return [("roi1", scan.spectra_roi1), ("roi2", scan.spectra_roi2)]
-    return [("counts", scan.decays)]
+    """
+    The signal datasets to store, as ``(name, array)`` pairs.
+
+    Read off the class's own ``_HDF5_SIGNALS`` rather than inferred from its
+    export layout.  Two instruments can share a wavelength axis and still
+    write a different number of signal arrays, so a layout test would quietly
+    store the wrong datasets for the second one.
+    """
+    if not scan._HDF5_SIGNALS:
+        raise NotImplementedError(
+            f"{type(scan).__name__} declares no _HDF5_SIGNALS, so there is "
+            f"no statement of which arrays an archive of it must carry. Set "
+            f"the class attribute to a ((dataset name, attribute), ...) tuple."
+        )
+    return [(name, getattr(scan, attr)) for name, attr in scan._HDF5_SIGNALS]
 
 
 # ---------------------------------------------------------------------------
