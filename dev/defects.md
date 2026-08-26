@@ -518,6 +518,24 @@ chain is `_nearest` → `_index_for_value` → *lambda* → `_sweep_selector` �
 `catch_warnings(record=True)` harness over all three entry points reports
 `nearest_index` → the caller's own line, `get_spectrum_at` → a line inside the loader rather than the caller's.
 
+*Third confirmed chain (2026-08-26).* The Jacobian-without-background warning
+carries `stacklevel=3`, and from `AttoCubeSpectralSweep.__init__` that lands **one
+level above** the line that constructed the scan — `sys:1` for a module-level
+call, and the caller's caller inside a function. It needs **2**: `__init__` is
+entered through `type.__call__`, which is C and consumes no Python frame, so level
+2 is already the researcher's line. Measured with a `catch_warnings(record=True)`
+harness against a committed export, before and after 0038 moved the call.
+
+0038 moved this warning into `_build_correction_ladder`, one frame further from
+the caller, and passed `stacklevel=4` so that it lands in exactly the same place
+as before — the off-by-one is **preserved, not fixed**, because this audit owns
+it and a refactor is not the place to change where a warning points.
+`tests/test_sweep_class_surface.py` now asserts only that it does not blame a line
+inside `loaders.py`, which is the part that must not regress; asserting the exact
+target would freeze the off-by-one. When this pass happens, the fix is
+`stacklevel=3` at the `_build_correction_ladder` call site in `__init__`, and the
+test tightens to `caught[0].filename == __file__`.
+
 Worth keeping because a lambda is invisible when the chain is traced by reading
 `def` lines, which is how the other 14 values will be checked. Anything routing
 through `_sweep_selector` inherits it and needs one more again:

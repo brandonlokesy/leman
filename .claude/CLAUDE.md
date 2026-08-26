@@ -312,6 +312,19 @@ keyword in the index there. Don't re-litigate, and don't "helpfully" restore.
   updating the required status checks on `main` in the same change. A required check is
   matched **by name**, so one that never reports blocks every pull request on a check
   that cannot arrive.
+- Don't give `_SpectralSweep` an `__init__`. Each loader writes its own explicit
+  signature and calls the shared steps by name, because the order is load-bearing
+  and because an inherited signature renders above a parameter table listing
+  arguments it does not take. Don't reach for a `_select_signal` hook, `**kwargs`
+  forwarding, or a mixin instead — all three are recorded as rejected in 0038.
+- Don't put an instrument's row labels, scales or units on `_Sweep._CURATED` or
+  `_Sweep._SIBLING_CURRENT`. Those two are empty on purpose: the curated *keys* are
+  the package's contract, the rows are one exporter's, and a scale and its unit
+  travel with the label. A new instrument names its own pair of module-level tables.
+- Don't use `_LAYOUT_KIND == "spectral"` as a test for which class an object is. It
+  says which export layout a decoder accepts, nothing more. "Carries two ROIs" is
+  `_HDF5_SIGNALS`; "has the correction ladder" is `isinstance(scan,
+  _SpectralSweep)`.
 
 ## Known issues — check before "helpfully" fixing
 
@@ -345,11 +358,14 @@ bwarea semantics are wanted at all.
   breaking changes to that one function are owed, so land them together. The panel's
   `color=` joins that same bundle, so don't spend a separate break on it.
   See `dev/plan-E12.md`.
-- **Every `stacklevel` in `loaders.py` is unverified** — 15 `warnings.warn` calls, no
-  test pinning where any of them points, and two chains confirmed wrong. A wrong value
-  also *suppresses repeats*, so it is a diagnostics failure rather than a cosmetic one.
+- **Almost every `stacklevel` in `loaders.py` is unverified** — 15 `warnings.warn`
+  calls, **three** chains now confirmed wrong, and only the Jacobian one pinned by a
+  test (and pinned loosely, so the pass is not pre-empted). A wrong value also
+  *suppresses repeats*, so it is a diagnostics failure rather than a cosmetic one.
   Its own pass, not a character changed while passing through. **Trace by measuring,
-  not by reading `def` lines.**
+  not by reading `def` lines.** Where a refactor moves a `warnings.warn` to a new
+  depth, thread `stacklevel` through as a parameter and pass the value that keeps it
+  pointing where it pointed — preserve the bug, do not quietly fix it here.
 - `DiffusionCloudPanel` accepts a `var_array` shorter than the animation and raises
   partway through rendering, and analyses every frame regardless of how many are being
   shown. Both want `diffusion`'s first tests, which do not exist yet.
