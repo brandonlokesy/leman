@@ -199,7 +199,7 @@ A handful of rows are **analysis-primary**, so they get promoted to first-class
 properties with a unit conversion attached. That promotion is the **curated
 registry**.
 
-The class-level table `_AttoCubeSweep._CURATED` maps
+The class-level table `_Sweep._CURATED` maps
 
 ```
 curated attribute  ->  (default row label, scale, unit)
@@ -605,7 +605,7 @@ scan = AttoCubeSpectralSweep(
 
 ## The base class contract
 
-`_AttoCubeSweep` holds everything independent of *what the measured axis is*. A
+`_Sweep` holds everything independent of *what the measured axis is*. A
 subclass declares four class attributes and then drives construction itself:
 
 ```python
@@ -1048,7 +1048,7 @@ figure), so `_assemble` compares them with `time_rtol`, never for equality.
 
 It is a **separate class rather than a mode of `AttoCubeSpectralSweep`**, and has no
 `spectra` attribute — the signal is `decays`, the axis is `time`, and there are no
-ROIs. Everything it shares lives in `_AttoCubeSweep`.
+ROIs. Everything it shares lives in `_Sweep`.
 
 `_TRPL_TIME_UNIT` is the single place the ns/4-ps-bin assumption is written down. Any
 fitted lifetime inherits it, and it is consistent with the Picoharp rows and a
@@ -1402,7 +1402,7 @@ A change that breaks one of these is a bug even if the tests pass.
 | add a new sweep axis | write the property, add a `_SWEEP_TYPES` row (+ `_SWEEP_REQUIRES` if it needs a specific row) — usable as `sweep=`, `fast_sweep=` and `slow_sweep=` at once, since all three share `_resolve_sweep` |
 | reshape a raster, or pick a spectrum out of one | declare `fast_sweep=`/`slow_sweep=`, then `as_grid()` / `get_spectrum_at()`; §`sweep_grid()` above |
 | add a new input format | write a decoder returning the §2.1 payload; add a suffix to the dispatch in `_decode` |
-| add a curated parameter | one row in `_AttoCubeSweep._CURATED`, plus a property |
+| add a curated parameter | one row in `_Sweep._CURATED`, plus a property |
 | add a curated-backed sweep axis | a `_SWEEP_TYPES` row whose unit is `None` — the unit comes from the registry entry, and a literal here would go stale under `curated_units` |
 | understand a gate refusal | the refusal matrix in §2.2 above |
 | know why a number is what it is | `dev/physics-conventions.md` |

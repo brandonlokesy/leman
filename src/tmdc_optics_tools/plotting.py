@@ -2648,7 +2648,7 @@ class GridImageSequence:
     :class:`ImageSequencePanel`-compatible sequence.
 
     For a stack already reshaped or reordered outside any loader — e.g.
-    :meth:`~tmdc_optics_tools.loaders._AttoCubeSweep.as_image_grid` followed
+    :meth:`~tmdc_optics_tools.loaders._Sweep.as_image_grid` followed
     by :func:`~tmdc_optics_tools.processing.reorder_grid` — rather than one
     that still has a ``load_frame`` of its own to forward to, which is what
     :class:`TrimmedImageSequence` is for.
@@ -2677,7 +2677,7 @@ class GridSweep:
     :class:`NormalizedSpectrumPanel`-compatible scan.
 
     For per-frame arrays already reshaped or reordered — e.g. via
-    :meth:`~tmdc_optics_tools.loaders._AttoCubeSweep.as_grid` followed by
+    :meth:`~tmdc_optics_tools.loaders._Sweep.as_grid` followed by
     :func:`~tmdc_optics_tools.processing.reorder_grid` — since the original
     sweep object's own arrays are in the wrong order for that reordering to
     apply to directly.

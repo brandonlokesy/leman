@@ -81,7 +81,7 @@ the `R`/`T` rows were getting wrong.
 Carry the reasoning as a comment above the dict, since the next person to add a
 row needs the rule, not just the result.
 
-### `signal_unit` on `_AttoCubeSweep`
+### `signal_unit` on `_Sweep`
 
 `signal_name` (bare) and `signal_label` (composed) exist; the unit alone is not
 reachable, which is *why* `plotting` hardcodes a composed string instead of

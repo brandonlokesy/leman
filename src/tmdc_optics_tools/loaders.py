@@ -1274,14 +1274,14 @@ def _order_by_iter(files: list, path, *, stacklevel: int) -> list:
 
 
 # ---------------------------------------------------------------------------
-# _AttoCubeSweep — shared machinery
+# _Sweep — shared machinery
 # ---------------------------------------------------------------------------
 
 class SweepGrid(NamedTuple):
     """
     A 2-D raster detected in the parameter rows: its fast axis and its slow one.
 
-    What :meth:`_AttoCubeSweep.sweep_grid` reports.  Names the same two axes a
+    What :meth:`_Sweep.sweep_grid` reports.  Names the same two axes a
     nest is declared with, so a detection reads directly as the ``fast_sweep=`` /
     ``slow_sweep=`` to pass — but it is a row-level guess, and a nest whose axis
     is a derived quantity will be reported through the rows that carry it.
@@ -1589,7 +1589,7 @@ class SweepNesting:
     """
     A declared 2-D sweep: a fast (inner) axis run to completion inside a slow one.
 
-    Held by :attr:`_AttoCubeSweep.nesting`.  Each coordinate array holds one value per
+    Held by :attr:`_Sweep.nesting`.  Each coordinate array holds one value per
     level of that axis, in acquisition order, so a descending sweep stays descending;
     they are *not* sorted.  A coordinate is the **median** of the readings taken at
     that level, and ``fast_spread`` / ``slow_spread`` carry the peak-to-peak range
@@ -1660,9 +1660,9 @@ class SweepNesting:
                 f"{self.n_fast * self.n_slow}{shape}")
 
 
-class _AttoCubeSweep:
+class _Sweep:
     """
-    Shared machinery for AttoCube sweeps, whatever the measured axis.
+    Shared machinery for a parameter sweep, whatever the measured axis.
 
     Not constructed directly — see :class:`AttoCubeSpectralSweep` (wavelength /
     energy) and :class:`AttoCubeTRPLSweep` (time).  Everything here is
@@ -3696,7 +3696,7 @@ _COSMIC_RAY_KEYS = frozenset(
 ) - {"spectra", "axis"}
 
 
-class AttoCubeSpectralSweep(_AttoCubeSweep):
+class AttoCubeSpectralSweep(_Sweep):
     """
     A sweep of spectra from the AttoCube cryogenic confocal.
 
@@ -4991,7 +4991,7 @@ class AttoCubePLVabScan(AttoCubeSpectralSweep):
 _TRPL_TIME_UNIT = "ns"
 
 
-class AttoCubeTRPLSweep(_AttoCubeSweep):
+class AttoCubeTRPLSweep(_Sweep):
     """
     Time-resolved PL from the AttoCube cryogenic confocal.
 
@@ -5116,7 +5116,7 @@ class AttoCubeTRPLSweep(_AttoCubeSweep):
     # Picoharp channels, relevant to normalising decay counts.  Units unconfirmed
     # — the same standing question as Scanner X/Y and power_scale.
     _CURATED = {
-        **_AttoCubeSweep._CURATED,
+        **_Sweep._CURATED,
         "rep_rate":        ("Picoharp - RepRate",                 1.0, "Hz?"),
         "meas_time":       ("Picoharp - Actual Measurement Time", 1.0, "s?"),
         "picoharp_counts": ("Picoharp - Counts",                  1.0, "counts"),
