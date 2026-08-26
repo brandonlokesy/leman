@@ -191,7 +191,7 @@ Ask before documenting or changing any of these.
 ## 9. Citations owed
 
 Under the project's citation rule, a reference must let a reader find the source.
-Four references in this package currently do not, and none can be completed without
+Five references in this package currently do not, and none can be completed without
 information only the group has:
 
 | Reference as it stands | What is missing |
@@ -199,6 +199,7 @@ information only the group has:
 | "the senior's thesis" — source of the thin-TMDC form and of the sign inconsistency in §2 | author, year, title, institution. Equation numbers were removed from this file because without the thesis itself they point nowhere. |
 | "Laturia et al. 2018" — source for `EPS_HBN` and the four TMDC permittivities | full reference and DOI, plus which table the values were read from |
 | "calibrated by CdG" — source of `power_scale` | who, when, and against what setup |
+| the BigTable parameter row map — what each positional row of that export is | a document from the acquisition program, or the program itself. The names in `_BIGTABLE_ROWS` come from a MATLAB snippet written by a colleague who uses the setup; it cannot be cited, and it maps row 9 to two different quantities and calls row 13 a gate current in amperes at a magnitude of 19 mA. Rows 10, 12, 13, 17 and 30 are left unnamed rather than guessed. Detail in `dev/instruments/big-table.md`. |
 | `PL_PEAKS["WSe2"]` seed positions — X0, XT and IX for WSe₂ | a source for each seed, or a statement of which spectra they were tuned against and by whom. Note that `EXCITON_ENERGY["WSe2"]["XA0"]` gives 1.75 eV for the same neutral intralayer exciton that `PL_PEAKS` seeds at 1.70 eV; the two have not been reconciled. |
 
 Until these are filled in, the claims that rest on them are recorded here as

@@ -1052,10 +1052,39 @@ has aligned the axes themselves has a route in, with no extra API.
 | `AttoCubeSpectralSweep` | one spectral CSV, or an `.h5` | the main one |
 | `AttoCubeTRPLSweep` | a **directory** of temporal CSVs, or an `.h5` | separate class, no `spectra` attribute |
 | `AttoCubePLVabScan` | — | compatibility shim over the above; raises `FutureWarning` |
+| `BigTableSpectralSweep` | one **headerless** spectral CSV | a sibling, not a subclass; see below |
 | `SingleSpectrum` | a 2-row CSV (row 0 = λ/nm, row 1 = counts) | mirrors the sweep's attribute names so plotting works unchanged |
 | `AttoCubePLScanRealSpace` | a directory of numeric-grid CSVs | image sequence for diffusion work |
 | `SingleImage`, `AttoCubeSampleImage`, `AttoCubePLImage` | one numeric-grid CSV | share `_AttoCubeImage`; only `AttoCubePLImage` takes `bg_region=` — see below |
 | `AttoCubeLaserReferenceImage` | one numeric-grid CSV | fits the laser spot centre and 1/e² radius on construction |
+
+## `BigTableSpectralSweep` — what a second instrument costs
+
+The useful thing about this class is how little of it there is. It shares
+`_SpectralSweep` with `AttoCubeSpectralSweep`, so the correction ladder, both
+axes, `pixel_slice` and the two spectrum accessors are inherited untouched. What
+it defines is a decoder, a `_CURATED`, a `_SIBLING_CURRENT`, a
+`_validate_payload` and an `__init__` — which is exactly the list decision
+0038 says a new spectral instrument owes.
+
+Three things about the export shape the class, and all three are recorded in
+`dev/instruments/big-table.md`:
+
+- **The parameter rows are positional**, so `_BIGTABLE_ROWS` names them and rows
+  whose meaning is not established keep a positional name (`Row 13`). They stay
+  readable through `parameters` and usable as a `sweep=` axis, which is what makes
+  not naming them free.
+- **There is one signal, not two.** The fourth field of each block duplicates the
+  third, so there is no `roi=`; a disagreement warns and names the pixel.
+- **Nothing in the file states its own layout.** No header, no block count, no
+  padding. So the class supplies the layout and refuses whatever does not fit,
+  and one of those refusals is load-bearing rather than defensive: a real-space
+  image's width divides by four often enough that the column count cannot tell
+  the two apart, so the check is that every block carries the *same* axis.
+
+`to_hdf5` refuses, in both directions. `hdf5._AXIS_KIND_FOR_LAYOUT` records which
+axis a file holds but nothing records which instrument wrote it, so a saved sweep
+would read back as an `AttoCubeSpectralSweep`.
 
 ## `AttoCubeTRPLSweep` — why a directory
 
@@ -1474,6 +1503,9 @@ skeleton of the whole design:
 | `_CLASS_FOR_KIND` | layout kind → class name | (for the "wrong class" error) |
 | `_CURATED` | curated attribute → (row label, scale, unit); the one home for that unit. **Empty on `_Sweep`** | a new promoted parameter, added to every instrument's table |
 | `_ATTOCUBE_CURATED` | the AttoCube's rows, shared by both AttoCube classes | a row the AttoCube writes that is worth promoting |
+| `_BIGTABLE_ROWS` | parameter row number (1-based) → the name **this package** gives it | a row of that export whose meaning has been established |
+| `_BIGTABLE_N_PARAM_ROWS` | how many rows of that export's parameter column are exposed | evidence that the block is longer than 30 |
+| `_BIGTABLE_CURATED`, `_BIGTABLE_SIBLING_CURRENT` | the same two roles as the AttoCube pair, for the BigTable | — |
 | `_ATTOCUBE_SIBLING_CURRENT` | AttoCube voltage row → the current row at the same terminal | another source-meter channel on that system |
 | `_SIBLING_CURRENT` | *(class attribute)* the same, per instrument. Empty on `_Sweep` | a new instrument's channel pairs |
 | `_HDF5_SIGNALS` | *(class attribute)* (dataset name, attribute) pairs an archive must carry | a class whose signal is not one of the existing shapes |
