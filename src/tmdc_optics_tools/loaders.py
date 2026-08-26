@@ -750,12 +750,43 @@ _GATE_ELECTRODES = tuple(_GATE_ROLE_CURATED)
 # and is what makes a single-gate declaration unambiguous.
 _GATE_ROLES = _GATE_ELECTRODES + ("channel",)
 
+# --- The AttoCube's rows ---------------------------------------------------
+# Both tables below describe one acquisition system, so they are named here once
+# and pointed at by both AttoCube classes rather than written out twice.  A second
+# instrument brings its own pair, sharing nothing: a row label, the scale that
+# turns that row into a physical quantity, and the unit that scale lands in are
+# all facts about the exporter.
+
+# Curated attribute -> (row label, scale, unit) for an AttoCube export.
+#
+# ``power`` carries a scale because the AttoCube writes a raw photodiode voltage;
+# the currents carry 1e9 because it writes amperes.  A scale and its unit are one
+# fact and move together (0029), which is why neither can sit on the shared base.
+#
+# The two gate voltages carry a default row even though ``gates`` is the only
+# thing that may declare wiring: ``_gate_candidates`` and ``gate_mode`` both
+# describe an *undeclared* scan and need somewhere to look.  The currents have no
+# such reader, so a default there would be a guess nothing consults — their
+# label is filled in from ``gates`` via ``_ATTOCUBE_SIBLING_CURRENT``, and access
+# is refused until it is.
+_ATTOCUBE_CURATED = {
+    "v_top":     ("V_A",              1.0,      "V"),
+    "v_bot":     ("V_B",              1.0,      "V"),
+    "power":     ("Excitation Power", 0.303e6,  "µW"),
+    "i_top":     (None,               1e9,      "nA"),
+    "i_bot":     (None,               1e9,      "nA"),
+    "i_channel": (None,               1e9,      "nA"),
+    "scanner_x": ("Scanner X",        1.0,      "V"),
+    "scanner_y": ("Scanner Y",        1.0,      "V"),
+}
+
 # Voltage row -> the current row measured at the same terminal.  A source-meter
 # channel applies a bias and reports the current it sources, so both rows describe
 # one electrode and a declaration naming either names both.  This is a property of
-# the export, fixed across every file seen, whereas which electrode that channel
-# reached is per-session wiring — so it belongs here rather than in ``gates``.
-_CHANNEL_SIBLING_CURRENT = {"V_A": "I_A", "V_B": "I_B"}
+# the export, fixed across every AttoCube file seen, whereas which electrode that
+# channel reached is per-session wiring — so it belongs here rather than in
+# ``gates``.
+_ATTOCUBE_SIBLING_CURRENT = {"V_A": "I_A", "V_B": "I_B"}
 
 # Which curated entry carries each role's current.  Covers all three roles, unlike
 # the voltage map above: a current flows at the channel contact just as it does at a
@@ -1694,39 +1725,36 @@ class _Sweep:
     # _bind_nesting still answers is_nested.
     _nesting = None
 
-    # Canonical curated parameters: attribute name -> (CSV row label, scale, unit).
-    # These are the analysis-primary quantities promoted to first-class
-    # properties (scaled views into :attr:`parameters`).  The label, scale and/or
-    # unit of any entry can be overridden per-instance via ``curated_labels`` /
-    # ``curated_scales`` / ``curated_units``; everything else in the file is
-    # reached through the generic :attr:`parameters` store.  A row listed here
-    # that a given file does not contain is not an error — the property raises
-    # only if accessed.
+    # Curated parameters: attribute name -> (row label, scale, unit).  These are
+    # the analysis-primary quantities promoted to first-class properties (scaled
+    # views into :attr:`parameters`).  The label, scale and/or unit of any entry
+    # can be overridden per-instance via ``curated_labels`` / ``curated_scales`` /
+    # ``curated_units``; everything else in the file is reached through the generic
+    # :attr:`parameters` store.  A row listed that a given file does not contain is
+    # not an error — the property raises only if accessed.
     #
     # The unit is not decoration: it is what ``_SWEEP_TYPES`` reads for a
     # curated-backed axis, so it reaches every axis label, ``__repr__`` line and
     # legend entry.  A scale and its unit are one fact and move together.
     #
     # The role-backed entries are the exception: their labels come from ``gates``
-    # alone, and the rows below are never read without one.  They are listed here
+    # alone and are never read without one.  They are still listed by an instrument
     # so that the file's own candidate rows can be named in that error, and so
     # ``curated_scales`` still reaches them.
     #
-    # The two voltages carry a default row because ``_gate_candidates`` and
-    # ``gate_mode`` both describe an *undeclared* scan and need somewhere to look;
-    # the currents have no such reader, so a default there would be a guess nothing
-    # consults.  Their label is filled in from ``gates`` via
-    # ``_CHANNEL_SIBLING_CURRENT``, and access is refused until it is.
-    _CURATED = {
-        "v_top":     ("V_A",              1.0,      "V"),
-        "v_bot":     ("V_B",              1.0,      "V"),
-        "power":     ("Excitation Power", 0.303e6,  "µW"),
-        "i_top":     (None,               1e9,      "nA"),
-        "i_bot":     (None,               1e9,      "nA"),
-        "i_channel": (None,               1e9,      "nA"),
-        "scanner_x": ("Scanner X",        1.0,      "V"),
-        "scanner_y": ("Scanner Y",        1.0,      "V"),
-    }
+    # **The keys are the contract; the rows are the instrument's.**
+    # ``_SWEEP_TYPES``, ``_SWEEP_REQUIRES``, ``_GATE_ROLE_CURATED`` and
+    # ``_ROLE_CURRENT_CURATED`` all name these attributes, and the properties below
+    # read them, so an instrument class must supply an entry for every one; a
+    # missing key raises where it is indexed rather than defaulting to something
+    # wrong.  What it must *not* do is inherit another instrument's labels, scales
+    # or units, which is why this table is empty.  See ``_ATTOCUBE_CURATED``.
+    _CURATED = {}
+
+    # Voltage row -> the current row measured at the same terminal, for this
+    # instrument.  Empty means no row pairs with another, and ``_role_current``
+    # then refuses for every role rather than guessing a sibling from a spelling.
+    _SIBLING_CURRENT = {}
 
     # --- Construction helpers ----------------------------------------------
 
@@ -1876,12 +1904,12 @@ class _Sweep:
 
         # The same declaration also names each electrode's current row, because a
         # source-meter channel's bias and current are one terminal.  A role declared
-        # on a row outside _CHANNEL_SIBLING_CURRENT leaves its current label None,
-        # and _role_current raises rather than guessing a sibling from the spelling.
+        # on a row outside this instrument's _SIBLING_CURRENT leaves its current
+        # label None, and _role_current raises rather than guessing from a spelling.
         for role, attr in _ROLE_CURRENT_CURATED.items():
             label = (self._gates or {}).get(role)
             if label is not None:
-                self._curated[attr][0] = _CHANNEL_SIBLING_CURRENT.get(label)
+                self._curated[attr][0] = self._SIBLING_CURRENT.get(label)
 
         # Conver to tuple - not mutable, so that the curated parameters cannot be changed after initialization.
         self._curated = {name: tuple(cfg) for name, cfg in self._curated.items()}
@@ -2708,7 +2736,7 @@ class _Sweep:
                 f"row '{row}', which is not a source-meter channel, so no row "
                 f"records the current at that terminal. Channels carrying both a "
                 f"bias and a current in this format: "
-                f"{sorted(_CHANNEL_SIBLING_CURRENT)}. The voltage is unaffected."
+                f"{sorted(self._SIBLING_CURRENT)}. The voltage is unaffected."
             )
         return self._curated_value(attr)
 
@@ -4189,6 +4217,11 @@ class AttoCubeSpectralSweep(_Sweep):
     _SIGNAL_ATTR = "spectra"
     _POINT_NOUN  = "pixels"
 
+    # Which rows this instrument writes, and which of them pair a bias with a
+    # current.  Shared with AttoCubeTRPLSweep: one system, one pair of tables.
+    _CURATED         = _ATTOCUBE_CURATED
+    _SIBLING_CURRENT = _ATTOCUBE_SIBLING_CURRENT
+
     def __init__(
         self,
         path           : str,
@@ -5116,11 +5149,12 @@ class AttoCubeTRPLSweep(_Sweep):
     # Picoharp channels, relevant to normalising decay counts.  Units unconfirmed
     # — the same standing question as Scanner X/Y and power_scale.
     _CURATED = {
-        **_Sweep._CURATED,
+        **_ATTOCUBE_CURATED,
         "rep_rate":        ("Picoharp - RepRate",                 1.0, "Hz?"),
         "meas_time":       ("Picoharp - Actual Measurement Time", 1.0, "s?"),
         "picoharp_counts": ("Picoharp - Counts",                  1.0, "counts"),
     }
+    _SIBLING_CURRENT = _ATTOCUBE_SIBLING_CURRENT
 
     def __init__(
         self,
