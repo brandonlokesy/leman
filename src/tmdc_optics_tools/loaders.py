@@ -12,6 +12,9 @@ AttoCubeSpectralSweep
     an HDF5 file written by its own :meth:`AttoCubeSpectralSweep.to_hdf5`.
 AttoCubePLVabScan
     Deprecated pre-rename name for the above, fixed to PL gate sweeps.
+BigTableSpectralSweep
+    The same, on the BigTable setup — a headerless export whose parameter
+    rows are positional and whose signal column is written twice.
 SingleSpectrum
     Single spectrum from a 2-row CSV.
 RamanSpectrum
@@ -788,6 +791,72 @@ _ATTOCUBE_CURATED = {
 # ``gates``.
 _ATTOCUBE_SIBLING_CURRENT = {"V_A": "I_A", "V_B": "I_B"}
 
+# --- The BigTable's rows ---------------------------------------------------
+# The export carries no labels anywhere: the parameter column is positional, so
+# every name below is **ours, not the file's**. What each one was established
+# from, and which rows are still unidentified, is in
+# `dev/instruments/big-table.md`.
+
+# Parameter row (1-based, as the acquisition program and every note about it
+# count them) -> the name given to that row. Rows inside the block with no entry
+# here keep a positional name: a guessed one would reach every figure axis and
+# every archive, whereas an unnamed row is still readable through
+# :attr:`parameters` and still usable as a sweep axis by that name.
+_BIGTABLE_ROWS = {
+    1:  "X Position",
+    2:  "Y Position",
+    3:  "Z Position",
+    4:  "Gate Voltage 1",
+    5:  "Gate Current 1",
+    6:  "Gate Voltage 2",
+    7:  "Gate Current 2",
+    8:  "Reflection",
+    9:  "Gate Voltage 3",
+    11: "Excitation Power",
+}
+
+# How many rows of the parameter column become `parameters`. Measured, not
+# declared by the file: nothing past row 30 carries a value in either committed
+# export. Whether the block is format-fixed at 30 is unknown, so a value beyond
+# it warns rather than being dropped in silence.
+_BIGTABLE_N_PARAM_ROWS = 30
+
+# Curated attribute -> (row label, scale, unit) for a BigTable export.
+#
+# Two differences from the AttoCube worth reading as physics rather than
+# bookkeeping. The power row is **already in microwatts**, so its scale is 1.0
+# where the AttoCube needs 0.303e6 to convert a photodiode voltage. And the
+# stage rows are in the piezo controller's own units, not volts and not
+# micrometres; converting them needs a per-stage calibration no file carries,
+# which is what `curated_scales=` and `curated_units=` are for.
+#
+# The gate-current rows carry scale 1.0 and **no unit**, which is a statement of
+# ignorance rather than a claim of dimensionlessness: rows 5 and 7 read between
+# 0.01 and 0.4, which is not a gate current in amperes. See
+# `dev/instruments/big-table.md`.
+#
+# The two gate voltages carry a default row for the same reason the AttoCube's
+# do -- `_gate_candidates` and `gate_mode` describe an *undeclared* scan and need
+# somewhere to look. `gates=` remains the only thing that can declare wiring.
+_BIGTABLE_CURATED = {
+    "v_top":     ("Gate Voltage 1",   1.0, "V"),
+    "v_bot":     ("Gate Voltage 2",   1.0, "V"),
+    "power":     ("Excitation Power", 1.0, "µW"),
+    "i_top":     (None,               1.0, ""),
+    "i_bot":     (None,               1.0, ""),
+    "i_channel": (None,               1.0, ""),
+    "scanner_x": ("X Position",       1.0, "piezo units"),
+    "scanner_y": ("Y Position",       1.0, "piezo units"),
+}
+
+# Gate voltage row -> the current row read at the same terminal. Gate 3's
+# current row is one of the unidentified ones, so gate 3 is not listed: declaring
+# it on row 9 gives a voltage and no current, which is the honest outcome.
+_BIGTABLE_SIBLING_CURRENT = {
+    "Gate Voltage 1": "Gate Current 1",
+    "Gate Voltage 2": "Gate Current 2",
+}
+
 # Which curated entry carries each role's current.  Covers all three roles, unlike
 # the voltage map above: a current flows at the channel contact just as it does at a
 # gate, and only the *field* is restricted to the two gate electrodes.
@@ -1083,14 +1152,24 @@ def _read_block_layout(path) -> dict:
     # block count and the stride — no arithmetic on the total column count.
     par_at = [i for i, name in enumerate(names) if _BLOCK_START.match(name)]
     if not par_at:
-        # No header at all: the first line is already data.  Both other CSV kinds
-        # look like this, and only the row count separates them, so name the class
-        # that fits rather than guessing at one.
+        # No header at all: the first line is already data.  Three other CSV
+        # kinds look like this, so name the ones that fit rather than guessing
+        # at one.  A two-row file is a single spectrum; past that, a whole
+        # number of 4-column blocks is a BigTable sweep and anything else is a
+        # real-space image.  The block test only *narrows* the suggestion, since
+        # an image can be 4 columns wide too.
         if two_rows_only:
             shape, better = (
                 "two rows",
                 "SingleSpectrum, which reads exactly this shape "
                 "(row 0 wavelength in nm, row 1 counts)",
+            )
+        elif len(names) % 4 == 0:
+            shape, better = (
+                f"more than two rows and {len(names)} columns",
+                "BigTableSpectralSweep, which reads a headerless export of "
+                "4-column blocks, or AttoCubePLScanRealSpace / SingleImage if "
+                "it is a real-space image",
             )
         else:
             shape, better = (
@@ -5222,6 +5301,497 @@ class AttoCubePLVabScan(AttoCubeSpectralSweep):
             # line.  The FutureWarning above is what asks them to move.
             curated_scales = {"power": power_scale} if power_scale is not None else None,
             roi            = roi,
+        )
+
+
+# ---------------------------------------------------------------------------
+# BigTableSpectralSweep
+# ---------------------------------------------------------------------------
+
+
+class BigTableSpectralSweep(_SpectralSweep):
+    """
+    A sweep of spectra from the BigTable setup.
+
+    Reads the BigTable's **headerless** spectral export: one four-column block
+    per sweep point, ``[parameter, wavelength, signal, signal]``, with the first
+    line already data. Every correction, both spectral axes, the gate vocabulary,
+    the sweep axis and the nest machinery behave exactly as they do for
+    :class:`AttoCubeSpectralSweep`, which documents them in full.
+
+    Three things are specific to this instrument.
+
+    **The parameter rows are positional.** The file carries no labels, so the
+    names in :attr:`parameters` are this package's, not the exporter's: ``X
+    Position``, ``Y Position``, ``Z Position``, ``Gate Voltage 1``, ``Gate
+    Current 1``, ``Gate Voltage 2``, ``Gate Current 2``, ``Reflection``, ``Gate
+    Voltage 3`` and ``Excitation Power``. Rows whose meaning is not established
+    keep a positional name, ``Row 12`` through ``Row 30``; they are readable and
+    usable as a sweep axis, they are simply not claimed to be anything. See
+    ``dev/instruments/big-table.md``.
+
+    **There is one signal, not two.** Columns 3 and 4 of every block hold
+    identical values in every file seen. What the second is meant to be is
+    unknown, so one signal is read, there is no ``roi=`` argument, and a
+    disagreement between the two columns warns rather than being discarded.
+
+    **Excitation power is already in microwatts**, and the stage positions are in
+    the piezo controller's own units. Converting a position to micrometres needs
+    a per-stage calibration no file carries; supply one through
+    ``curated_scales`` and say what the numbers then are through
+    ``curated_units``.
+
+    Parameters
+    ----------
+    path : str or Path
+        A raw ``.csv`` export. An ``.h5`` written by ``to_hdf5`` is **not**
+        accepted; see *Raises*.
+    spectra_type : str
+        What was measured, e.g. ``"PL"``. Required and keyword-only: a raw export
+        records nothing, and a default would be a guess that outlives the
+        session. One of :data:`~tmdc_optics_tools.constants.SPECTROSCOPY_TYPES`.
+    sweep : str, optional
+        What was scanned. Either a registry key (``"electric_field"``,
+        ``"carrier_density"``, ``"top_voltage"``, ``"bottom_voltage"``,
+        ``"power"``, ``"piezo_x"``, ``"piezo_y"``) or any parameter row label,
+        including a positional one. Undeclared means the sweep **index**, never
+        an auto-detected parameter.
+    sweep_label, sweep_unit : str, optional
+        Override the resolved axis label and unit. A row-backed sweep has no unit
+        of its own, so a bare row label wants both.
+    fast_sweep, slow_sweep : str, optional
+        Declare a 2-D nest. Same vocabulary as *sweep*; both are required
+        together.
+    n_fast, n_slow : int, optional
+        Assert the nest shape instead of resolving it from the readings.
+    fast_group_by, slow_group_by : str, optional
+        Establish an axis's levels from a different row than the one plotted.
+    geometry : DeviceGeometry, optional
+        Needed for :attr:`ef` and :attr:`carrier_density`, and therefore for
+        ``sweep="electric_field"`` or ``"carrier_density"``.
+    gates : dict, optional
+        Which parameter row reached which electrode, as
+        ``{"top": ..., "bottom": ..., "channel": ...}``. **The wiring on this
+        setup varies between samples**, so nothing is assumed: every
+        role-dependent quantity refuses until it is declared. A grounded
+        electrode is declared as ``None``.
+    cosmic_rays : dict, optional
+        Forwarded to :func:`~tmdc_optics_tools.processing.remove_cosmic_rays`.
+        ``{}`` accepts every default; ``None`` leaves the repair off.
+    bg_region_nm, bg_region_eV : tuple, optional
+        Window whose mean is subtracted as a pedestal. At most one.
+    bg_spectrum : optional
+        A measured background on this scan's own wavelength grid.
+    reference : optional
+        A reference spectrum; supplying it is what opts into :attr:`contrast`.
+    reference_scale : float, optional
+        Multiplies *reference* before the contrast is formed.
+    contrast : {"contrast", "ratio"}
+        ``(S-R)/R`` or ``S/R``.
+    apply_jacobian : bool
+        Apply the ``λ²/hc`` density correction to the energy-axis arrays.
+    curated_labels, curated_scales, curated_units : dict, optional
+        Per-instance overrides of the curated registry. The gate and current
+        entries cannot be relabelled here -- that is what ``gates`` is for.
+
+    Attributes
+    ----------
+    wavelength : np.ndarray, shape (n_pixels,)
+        nm, ascending.
+    spectra : np.ndarray, shape (n_pixels, n_sweeps)
+        The file's own counts, never mutated after load.
+    energy : np.ndarray, shape (n_pixels,)
+        eV, ascending.
+    parameters : dict
+        Every exposed parameter row, in the file's own units.
+
+    Raises
+    ------
+    ValueError
+        If the file is a headed AttoCube export, a two-row single spectrum, or a
+        numeric grid whose column count is not a whole number of blocks. Each
+        message names the class that does read it.
+    NotImplementedError
+        On :meth:`to_hdf5`, and on an ``.h5`` input. The archive format records
+        which axis a file holds but not which instrument wrote it, so a BigTable
+        scan would read back as an AttoCube one.
+
+    See Also
+    --------
+    AttoCubeSpectralSweep : the same machinery, reading the headed AttoCube
+        export; its docstring documents the shared parameters and the correction
+        ladder in full.
+
+    Examples
+    --------
+    >>> scan = BigTableSpectralSweep(          # doctest: +SKIP
+    ...     "PL_Ez_1LWSe2_p20uW_exp1sec_250508_190009.csv",
+    ...     spectra_type = "PL",
+    ...     gates        = {"top": "Gate Voltage 2",
+    ...                     "bottom": "Gate Voltage 1",
+    ...                     "channel": None},
+    ...     sweep        = "Gate Voltage 1",
+    ...     sweep_label  = r"$V_\\mathrm{g1}$",
+    ...     sweep_unit   = "V",
+    ... )
+    """
+
+    # No header names the layout, so the reading class is the only thing that
+    # knows it. Not a key of _BLOCK_LAYOUTS, which is keyed on header field
+    # names this export does not have.
+    _LAYOUT_KIND = "bigtable_spectral"
+
+    # One block, in column order. The fourth field duplicates the third in every
+    # file seen; both are read so the two can be compared.
+    _BLOCK_ROLES = ("Par", "Wavelength", "Signal", "SignalCopy")
+
+    _CURATED         = _BIGTABLE_CURATED
+    _SIBLING_CURRENT = _BIGTABLE_SIBLING_CURRENT
+
+    # _HDF5_SIGNALS stays at the inherited empty default: to_hdf5 refuses before
+    # anything reads it, and an entry here would imply the archive round-trips.
+
+    def __init__(
+        self,
+        path            : str,
+        *,
+        spectra_type    : str   = None,
+        sweep           : str   = None,
+        sweep_label     : str   = None,
+        sweep_unit      : str   = None,
+        fast_sweep      : str   = None,
+        slow_sweep      : str   = None,
+        n_fast          : int   = None,
+        n_slow          : int   = None,
+        fast_group_by   : str   = None,
+        slow_group_by   : str   = None,
+        geometry        : DeviceGeometry = None,
+        cosmic_rays     : dict  = None,
+        bg_region_nm    : tuple = None,
+        bg_region_eV    : tuple = None,
+        bg_spectrum             = None,
+        reference               = None,
+        reference_scale : float = None,
+        contrast        : str   = "contrast",
+        apply_jacobian  : bool  = False,
+        gates           : dict  = None,
+        curated_labels  : dict  = None,
+        curated_scales  : dict  = None,
+        curated_units   : dict  = None,
+    ):
+        self._check_spectral_arguments(bg_region_nm, bg_region_eV, cosmic_rays)
+
+        # --- Decode, and settle everything independent of the spectral axis ---
+        payload = self._decode_and_describe(
+            path, spectra_type=spectra_type, geometry=geometry, gates=gates,
+            curated_labels=curated_labels, curated_scales=curated_scales,
+            curated_units=curated_units,
+        )
+
+        self.wavelength = payload["wavelength"]      # nm, ascending
+        self.spectra    = payload["spectra"]         # (n_pixels, n_sweeps)
+        self._validate_payload()
+
+        self._bind_aux_spectra(bg_spectrum, reference, reference_scale,
+                               contrast, apply_jacobian)
+
+        # No curated row is mandatory: a file from a different acquisition
+        # configuration still loads, and each property raises only if accessed.
+        # What *is* checked is the row the declared sweep needs — which is why
+        # this comes after the signal array, since it validates against n_sweeps.
+        self._bind_sweep_axis(sweep, sweep_label, sweep_unit)
+        self._bind_nesting(fast_sweep, slow_sweep, n_fast=n_fast, n_slow=n_slow,
+                           fast_group_by=fast_group_by,
+                           slow_group_by=slow_group_by)
+
+        # stacklevel=4, not 3: this method is one frame further from the
+        # caller than __init__ is, and the warnings inside it must still
+        # blame the line that constructed the scan.
+        self._build_correction_ladder(
+            cosmic_rays, bg_region_nm, bg_region_eV, stacklevel=4,
+        )
+
+    # --- Decoding ----------------------------------------------------------
+
+    @classmethod
+    def _decode_csv(cls, path) -> dict:
+        """
+        Decode a headerless BigTable spectral export.
+
+        Each sweep point occupies a ``[Par, Wavelength, Signal, SignalCopy]``
+        block, so every field is a stride-4 column slice — the same arithmetic
+        the headed export uses, through :func:`_slice_spectral_blocks`. What
+        differs is where the layout comes from: there is no header to read it
+        off, so this class supplies it and refuses anything that does not fit.
+        """
+        cls._refuse_a_file_it_cannot_read(path)
+
+        width = len(cls._BLOCK_ROLES)
+        raw   = pd.read_csv(path, header=None, low_memory=False)
+        d     = raw.to_numpy(dtype=float)
+
+        # No header declares a block count, so the column count is the only
+        # statement of one, and _refuse_a_file_it_cannot_read has already
+        # checked it divides. There is no trailing pad to trim.
+        cls._refuse_an_axis_that_is_not_repeated(d, width, path)
+
+        row_labels = cls._row_labels(d.shape[0])
+        sliced     = _slice_spectral_blocks(d, cls._BLOCK_ROLES, row_labels, path)
+
+        cls._warn_if_the_block_is_longer(d, width, path)
+        signal = cls._one_signal(sliced["signals"], path)
+
+        return {
+            "wavelength" : sliced["axis"],
+            "spectra"    : signal,
+            "parameters" : sliced["parameters"],
+            "metadata"   : {},          # a raw export records none
+            "n_declared" : sliced["n_declared"],
+        }
+
+    @classmethod
+    def _row_labels(cls, n_rows: int) -> list:
+        """
+        Name each row of the parameter column, in order.
+
+        ``_BIGTABLE_ROWS`` is keyed by the **1-based** row number, matching the
+        acquisition program and every note about this format; the list this
+        returns is indexed from 0 like the array it describes, which is the one
+        place the two conventions meet.
+
+        A row inside the block with no established meaning is named for its
+        position rather than left out, so it stays reachable through
+        :attr:`parameters` and usable as a sweep axis. Rows past the block are
+        unnamed, and :func:`_slice_spectral_blocks` drops them.
+        """
+        n_exposed = min(_BIGTABLE_N_PARAM_ROWS, n_rows)
+        return [_BIGTABLE_ROWS.get(i + 1, f"Row {i + 1}") for i in range(n_exposed)]
+
+    @classmethod
+    def _refuse_a_file_it_cannot_read(cls, path) -> None:
+        """
+        Refuse a file of the wrong shape, naming the class that reads it.
+
+        One short read, in the order that makes each test meaningful: a header
+        settles it outright; then a two-row file, because a single spectrum is
+        also headerless and a block count cannot tell the two apart; then the
+        column count.
+
+        Raises
+        ------
+        ValueError
+            Always, unless the file could be a BigTable spectral export.
+        """
+        with open(path, "r") as fh:
+            first = fh.readline()
+            # Only whether a third row exists matters, so two lines settle it.
+            two_rows_only = _n_rows_upto(fh, 2) < 2
+
+        names = [name.strip() for name in first.split(",")]
+
+        if any(_BLOCK_START.match(name) for name in names):
+            # A headed AttoCube export. Ask the header which of its two layouts,
+            # so the message names the class that actually fits rather than
+            # guessing at the more common one.
+            blocks = _read_block_layout(path)
+            raise ValueError(
+                f"'{path}' has a header declaring "
+                f"[{', '.join(blocks['roles'])}] blocks, so it is a headed "
+                f"{blocks['kind']} export. {cls.__name__} reads the BigTable "
+                f"export, whose first line is already data. Use "
+                f"{_CLASS_FOR_KIND[blocks['kind']]} instead."
+            )
+
+        if two_rows_only:
+            raise ValueError(
+                f"'{path}' has two rows, which is a single spectrum (row 0 "
+                f"wavelength in nm, row 1 counts) rather than a sweep. Load it "
+                f"with SingleSpectrum. A BigTable spectral export has one row "
+                f"per spectrometer pixel."
+            )
+
+        width = len(cls._BLOCK_ROLES)
+        if len(names) % width:
+            raise ValueError(
+                f"'{path}' has {len(names)} columns, which is not a whole "
+                f"number of {width}-column "
+                f"[{', '.join(cls._BLOCK_ROLES)}] blocks, so it is not a "
+                f"BigTable spectral export. A bare numeric grid of any width is "
+                f"a real-space image: read a directory of them with "
+                f"AttoCubePLScanRealSpace, or one frame with SingleImage."
+            )
+
+    @classmethod
+    def _refuse_an_axis_that_is_not_repeated(
+        cls, d: np.ndarray, width: int, path,
+    ) -> None:
+        """
+        Refuse a grid whose blocks do not share one axis.
+
+        This is what separates a sweep from a real-space image — the column
+        count cannot, because an image's width is a multiple of four often
+        enough (a 512-pixel frame is committed under
+        ``examples/data/exciton-diffusion/``).  In a sweep the second field of
+        every block holds the same wavelength axis; in an image that column is
+        pixel values, which do not repeat from block to block.
+
+        It is also a real consistency check rather than only a classifier: every
+        sweep point of one export is supposed to share one spectrometer axis, and
+        only the first written block's copy is read, so nothing else would notice
+        if they disagreed.
+
+        Raises
+        ------
+        ValueError
+            If two written blocks carry different axes.
+        """
+        # (n_rows, n_blocks): the axis field of every block.
+        axes = d[:, 1::width]
+        # A block the exporter left unwritten is zero throughout and carries no
+        # axis to compare; _drop_unwritten_blocks removes those later.
+        written = axes.any(axis=0)
+        if not written.any():
+            return          # nothing written at all; _validate_payload says so
+        reference = axes[:, np.argmax(written)]
+        differs = ~np.all(axes[:, written] == reference[:, None], axis=0)
+        if differs.any():
+            block = int(np.flatnonzero(written)[np.argmax(differs)])
+            px    = int(np.argmax(axes[:, block] != reference))
+            raise ValueError(
+                f"'{path}' has {axes.shape[1]} four-column blocks, but they do "
+                f"not share one axis: block 0 reads "
+                f"{reference[px]!r} at row {px} where block {block} reads "
+                f"{axes[px, block]!r}. In a BigTable spectral export the second "
+                f"field of every block holds the same wavelength axis. A bare "
+                f"numeric grid whose width happens to divide by four is far "
+                f"more likely a real-space image: read a directory of them with "
+                f"AttoCubePLScanRealSpace, or one frame with SingleImage."
+            )
+
+    @classmethod
+    def _one_signal(cls, signals: dict, path) -> np.ndarray:
+        """
+        Reduce the two identical signal columns of each block to one.
+
+        The fourth field of every block duplicates the third, in all 217 080
+        pairs across the two committed exports. What it is *meant* to be is
+        unknown, so the third is read and a disagreement is reported rather than
+        discarded — a difference is the evidence that would settle it.
+        """
+        signal, copy = signals["Signal"], signals["SignalCopy"]
+        if not np.array_equal(signal, copy):
+            # Name one specific disagreement: "they differ" sends the reader
+            # looking through 200 000 numbers.
+            px, sweep = (int(i) for i in np.argwhere(signal != copy)[0])
+            warnings.warn(
+                f"The two signal columns of '{path}' disagree — at pixel {px}, "
+                f"sweep point {sweep}, column 3 reads {signal[px, sweep]!r} and "
+                f"column 4 reads {copy[px, sweep]!r}. They are identical in "
+                f"every file this loader was established from, so the fourth "
+                f"was taken to be a copy and only the third is read as "
+                f"'spectra'. A disagreement means it is not a copy: check what "
+                f"the acquisition program writes there before trusting this "
+                f"scan.",
+                # 7, measured rather than counted off the def lines. The chain
+                # is caller -> __init__ -> _decode_and_describe ->
+                # BigTableSpectralSweep._decode -> _Sweep._decode ->
+                # _decode_csv -> here. The easy-to-miss frame is this class's
+                # own _decode override, which refuses .h5 and then delegates.
+                UserWarning, stacklevel=7,
+            )
+        return signal
+
+    @classmethod
+    def _warn_if_the_block_is_longer(cls, d: np.ndarray, width: int, path) -> None:
+        """
+        Report a parameter value below the last row this loader exposes.
+
+        Thirty rows is measured from two exports, not declared by the format, so
+        a value below it means the block is longer than those files showed —
+        which is worth knowing rather than silently dropping.
+        """
+        if d.shape[0] <= _BIGTABLE_N_PARAM_ROWS:
+            return
+        # The Par column of every block, on the rows past the exposed block.
+        beyond = d[_BIGTABLE_N_PARAM_ROWS:, ::width]
+        rows   = np.argwhere(beyond != 0.0)
+        if rows.size:
+            first = int(rows[0][0]) + _BIGTABLE_N_PARAM_ROWS + 1
+            warnings.warn(
+                f"'{path}' carries a non-zero parameter value on row {first}, "
+                f"past the {_BIGTABLE_N_PARAM_ROWS} rows this loader exposes. "
+                f"That count is measured from the exports this loader was "
+                f"established from, not declared by the format, so a longer "
+                f"block means a different acquisition configuration. The value "
+                f"is not in 'parameters'; raise _BIGTABLE_N_PARAM_ROWS to reach "
+                f"it, and record what the row is in "
+                f"dev/instruments/big-table.md.",
+                # 7, measured: the same chain as _one_signal's warning.
+                UserWarning, stacklevel=7,
+            )
+
+    def _validate_payload(self) -> None:
+        """
+        Check the decoded arrays are self-consistent before anything uses them.
+
+        Adds a strictly-increasing test to the shared checks, because this
+        export gives the axis no other verification: there is no header stating
+        a pixel count, so a stride read one column out lands on the parameter
+        column and produces an axis with repeats and zeros rather than failing.
+        A zero also reaches ``hc/λ`` as a division by zero two steps later.
+        """
+        if self.spectra.ndim == 2 and self.spectra.shape[1] == 0:
+            raise ValueError(
+                f"'{self.path}' contains no spectra — every block is "
+                f"zero-filled, so there is a parameter table and no "
+                f"measurement."
+            )
+        self._validate_axis_and_signals(self.wavelength, {"Signal": self.spectra})
+
+        steps = np.diff(self.wavelength)
+        if steps.size and steps.min() <= 0:
+            bad = int(np.argmin(steps))
+            raise ValueError(
+                f"'{self.path}' yielded a wavelength axis that does not "
+                f"increase: row {bad} reads {self.wavelength[bad]!r} and row "
+                f"{bad + 1} reads {self.wavelength[bad + 1]!r}. A spectrometer "
+                f"axis is monotonic, so this is a misread rather than a "
+                f"measurement — most likely a file whose rows are not one per "
+                f"spectrometer pixel, which this format requires."
+            )
+
+    # --- What this class does not do ---------------------------------------
+
+    def _decode(self, path) -> dict:
+        """
+        Read *path*, refusing the archive format this class cannot round-trip.
+
+        Checked before the suffix dispatch rather than in :meth:`to_hdf5`, so
+        that reading and writing refuse for the same stated reason.
+        """
+        if Path(path).suffix.lower() in _HDF5_SUFFIXES:
+            raise NotImplementedError(self._no_hdf5_yet(reading=True))
+        return super()._decode(path)
+
+    def to_hdf5(self, path, **kwargs):
+        """Not available for this instrument yet — see the message it raises."""
+        raise NotImplementedError(self._no_hdf5_yet(reading=False))
+
+    @classmethod
+    def _no_hdf5_yet(cls, *, reading: bool) -> str:
+        """
+        The one wording for both directions of the HDF5 refusal.
+
+        Shared so a reader who hits one and then the other is told the same
+        thing, and so the two cannot drift apart.
+        """
+        action = "read" if reading else "written"
+        return (
+            f"A {cls.__name__} cannot be {action} as HDF5 yet. The archive "
+            f"format records which axis a file holds but not which instrument "
+            f"wrote it, so it cannot tell a BigTable scan from an AttoCube one "
+            f"and a saved sweep would read back as the wrong class. Load the "
+            f"raw .csv export instead."
         )
 
 
