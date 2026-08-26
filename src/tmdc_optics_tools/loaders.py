@@ -1129,6 +1129,82 @@ def _read_block_layout(path) -> dict:
     }
 
 
+def _slice_spectral_blocks(d: np.ndarray, roles: tuple, row_labels: list,
+                          path) -> dict:
+    """
+    Slice a block-structured export into its axis, parameters and signals.
+
+    Every field of a block is a stride-``len(roles)`` column slice, so this is
+    the same arithmetic whatever named the blocks: a header the exporter wrote,
+    or a layout the reading class knows because the file carries no header at
+    all.  Shared so the two cannot drift, since a stride read wrong does not
+    fail — it silently interleaves one sweep point's counts with the next
+    point's parameters.
+
+    Parameters
+    ----------
+    d : np.ndarray, shape (n_rows, n_blocks * len(roles))
+        The file as a float array, **already trimmed** to whole blocks.
+    roles : tuple of str
+        One block's field names in order.  Must contain ``"Par"`` and
+        ``"Wavelength"``; every other entry is treated as a signal.
+    row_labels : list
+        Name for each leading row of the ``Par`` column, in order.  A blank or
+        missing entry drops that row rather than naming it.
+    path : str or Path
+        Only for the diagnostics raised by :func:`_drop_unwritten_blocks`.
+
+    Returns
+    -------
+    dict
+        ``axis`` : (n_points,) the shared axis, on its real pixel rows.
+        ``parameters`` : label -> (n_sweeps,) in the file's own units.
+        ``signals`` : role -> (n_points, n_sweeps), one per non-axis field.
+        ``n_declared`` : blocks before the unwritten ones were dropped.
+
+    Notes
+    -----
+    The axis is repeated once per block; the first *written* block's copy is
+    the one taken, and its finite entries select the real pixel rows.  With
+    nothing written at all the axis is zeros and the caller gets a diagnostic
+    from its own ``_validate_payload`` rather than an ``IndexError`` here.
+    """
+    width = len(roles)
+
+    # One column index per sweep point, for each field of the block.
+    cols = {role: np.arange(offset, d.shape[1], width)
+            for offset, role in enumerate(roles)}
+
+    # Blocks the exporter declared but never wrote are zero-filled, not
+    # empty, so they survive any NaN-based strip and must go before the
+    # arrays are shaped.
+    keep, n_declared, axis_block = _drop_unwritten_blocks(
+        d[:, cols["Wavelength"]], path)
+
+    # Labeled scalar rows are overlaid on the leading pixel rows: row i's
+    # value for sweep j sits in that block's Par column.
+    parameters = {
+        str(label): d[i, cols["Par"]][keep]
+        for i, label in enumerate(row_labels)
+        if not pd.isna(label) and str(label).strip()
+    }
+
+    axis_raw = d[:, cols["Wavelength"][axis_block]]
+    valid_px = np.isfinite(axis_raw)
+
+    # (n_valid_pixels, n_written_blocks) per signal field: the row mask picks
+    # the real pixels, the column mask picks the blocks that were written.
+    signals = {role: d[valid_px][:, cols[role][keep]]
+               for role in roles if role not in ("Par", "Wavelength")}
+
+    return {
+        "axis"       : axis_raw[valid_px],
+        "parameters" : parameters,
+        "signals"    : signals,
+        "n_declared" : n_declared,
+    }
+
+
 def _drop_unwritten_blocks(axis_col: np.ndarray, path) -> tuple:
     """
     Strip blocks the exporter declared and zero-filled but never wrote.
@@ -4985,48 +5061,23 @@ class AttoCubeSpectralSweep(_SpectralSweep):
         raw = pd.read_csv(path, header=0, index_col=0, low_memory=False)
         row_labels = list(raw.index)
 
-        # The code reads the whole CSV first and then keeps only the columns that
-        # belong to the declared sweep blocks. That choice is faster than asking 
-        # pandas.read_csv(..., usecols=...) to pre-filter a very large number of columns, 
-        # because dropping thousands of unused columns during parsing is more expensive 
-        # than parsing them and discarding them afterward.
-
-        # Remove trailing pad
+        # The whole CSV is read and then trimmed to the declared blocks, rather
+        # than pre-filtered with pandas.read_csv(..., usecols=...): dropping
+        # thousands of unused columns during parsing costs more than parsing
+        # them and discarding them afterward.  The trailing pad goes here.
         d = raw.to_numpy(dtype=float)[:, :n_declared * width]
 
-        # One column index per sweep point, for each field of the block.
-        cols = {role: np.arange(offset, d.shape[1], width)
-                for offset, role in enumerate(blocks["roles"])}
-
-        # Blocks the exporter declared but never wrote are zero-filled, not
-        # empty, so they survive any NaN-based strip and must go before the
-        # arrays are shaped.
-        keep, n_declared, axis_block = _drop_unwritten_blocks(
-            d[:, cols["Wavelength"]], path)
-
-        # Labeled scalar rows are overlaid on the leading pixel rows: row i's
-        # value for sweep j sits in that block's Par column.
-        parameters = {
-            str(label): d[i, cols["Par"]][keep]
-            for i, label in enumerate(row_labels)
-            if not pd.isna(label) and str(label).strip()
-        }
-
-        # The axis is repeated once per sweep point; take the first written one
-        # and use its finite entries to select the real pixel rows.  With nothing
-        # written at all the axis is zeros, and the caller gets the diagnostic
-        # from _validate_payload rather than an IndexError.
-        axis_raw = d[:, cols["Wavelength"][axis_block]]
-        valid_px = np.isfinite(axis_raw)
-
+        sliced = _slice_spectral_blocks(d, blocks["roles"], row_labels, path)
         payload = {
-            "wavelength" : axis_raw[valid_px],
-            "parameters" : parameters,
+            "wavelength" : sliced["axis"],
+            "parameters" : sliced["parameters"],
             "metadata"   : {},          # a raw export records none
-            "n_declared" : n_declared,
+            "n_declared" : sliced["n_declared"],
         }
+        # Both ROIs are always loaded; `roi=` only chooses what `spectra`
+        # points at.
         for role, out in (("ExpROI1", "roi1"), ("ExpROI2", "roi2")):
-            payload[out] = d[valid_px][:, cols[role][keep]]
+            payload[out] = sliced["signals"][role]
         return payload
 
     def _validate_payload(self) -> None:
