@@ -4251,22 +4251,7 @@ class AttoCubeSpectralSweep(_Sweep):
         curated_units   : dict  = None,
         roi             : int   = None,
     ):
-        # Both checks precede the read: an export is large enough that a mistyped
-        # argument should not cost the decode before it is reported.
-        if bg_region_nm is not None and bg_region_eV is not None:
-            raise ValueError(
-                "Provide at most one of bg_region_nm or bg_region_eV, not both."
-            )
-        if cosmic_rays is not None:
-            unknown = set(cosmic_rays) - _COSMIC_RAY_KEYS
-            if unknown:
-                raise ValueError(
-                    f"cosmic_rays received unknown key(s) {sorted(unknown)}. "
-                    f"Accepted: {sorted(_COSMIC_RAY_KEYS)} — these are forwarded "
-                    f"to processing.remove_cosmic_rays, whose 'spectra' and "
-                    f"'axis' are set by the loader. Pass cosmic_rays={{}} to "
-                    f"accept every default."
-                )
+        self._check_spectral_arguments(bg_region_nm, bg_region_eV, cosmic_rays)
 
         # --- Decode, and settle everything independent of the spectral axis ---
         payload = self._decode_and_describe(
@@ -4305,6 +4290,67 @@ class AttoCubeSpectralSweep(_Sweep):
                 UserWarning, stacklevel=3,
             )
 
+        self._bind_aux_spectra(bg_spectrum, reference, reference_scale,
+                               contrast, apply_jacobian)
+
+        # No curated row is mandatory: a file from a different instrument
+        # configuration still loads, and each property raises only if accessed.
+        # What *is* checked is the row the declared sweep needs — which is why
+        # this comes after the signal array, since it validates against n_sweeps.
+        self._bind_sweep_axis(sweep, sweep_label, sweep_unit)
+        self._bind_nesting(fast_sweep, slow_sweep, n_fast=n_fast, n_slow=n_slow,
+                           fast_group_by=fast_group_by,
+                           slow_group_by=slow_group_by)
+
+        # stacklevel=4, not 3: this method is one frame further from the
+        # caller than __init__ is, and the warnings inside it must still
+        # blame the line that constructed the scan.
+        self._build_correction_ladder(
+            cosmic_rays, bg_region_nm, bg_region_eV, stacklevel=4,
+        )
+
+    # --- The construction steps, in the order __init__ calls them ----------
+
+    def _check_spectral_arguments(
+        self, bg_region_nm, bg_region_eV, cosmic_rays,
+    ) -> None:
+        """
+        Reject a mistyped argument before the file is read.
+
+        Raises
+        ------
+        ValueError
+            If both background windows are given, or ``cosmic_rays`` carries a
+            key :func:`processing.remove_cosmic_rays` does not accept.
+        """
+        # Both checks precede the read: an export is large enough that a mistyped
+        # argument should not cost the decode before it is reported.
+        if bg_region_nm is not None and bg_region_eV is not None:
+            raise ValueError(
+                "Provide at most one of bg_region_nm or bg_region_eV, not both."
+            )
+        if cosmic_rays is not None:
+            unknown = set(cosmic_rays) - _COSMIC_RAY_KEYS
+            if unknown:
+                raise ValueError(
+                    f"cosmic_rays received unknown key(s) {sorted(unknown)}. "
+                    f"Accepted: {sorted(_COSMIC_RAY_KEYS)} — these are forwarded "
+                    f"to processing.remove_cosmic_rays, whose 'spectra' and "
+                    f"'axis' are set by the loader. Pass cosmic_rays={{}} to "
+                    f"accept every default."
+                )
+
+
+    def _bind_aux_spectra(
+        self, bg_spectrum, reference, reference_scale, contrast, apply_jacobian,
+    ) -> None:
+        """
+        Record the correction flags and resolve the auxiliary spectra.
+
+        Called before the sweep axis is bound, because resolving an auxiliary
+        spectrum can fail on a grid mismatch and that is the more useful error
+        of the two to see first.
+        """
         self.apply_jacobian  = apply_jacobian
         self.contrast_mode   = contrast
         self.reference_scale = reference_scale
@@ -4315,14 +4361,39 @@ class AttoCubeSpectralSweep(_Sweep):
         if self.reference is not None and reference_scale is not None:
             self.reference = self.reference * float(reference_scale)
 
-        # No curated row is mandatory: a file from a different instrument
-        # configuration still loads, and each property raises only if accessed.
-        # What *is* checked is the row the declared sweep needs — which is why
-        # this comes after the signal array, since it validates against n_sweeps.
-        self._bind_sweep_axis(sweep, sweep_label, sweep_unit)
-        self._bind_nesting(fast_sweep, slow_sweep, n_fast=n_fast, n_slow=n_slow,
-                           fast_group_by=fast_group_by,
-                           slow_group_by=slow_group_by)
+
+    def _build_correction_ladder(
+        self, cosmic_rays, bg_region_nm, bg_region_eV, *, stacklevel: int,
+    ) -> None:
+        """
+        Build every rung of the correction ladder, on both axes.
+
+        Reads :attr:`spectra` and :attr:`wavelength`, which the caller has
+        already set, and :attr:`apply_jacobian` / :attr:`contrast_mode`, which
+        :meth:`_bind_aux_spectra` has already recorded.  Every rung is assigned
+        unconditionally, ``None`` included: ``_resolve_spectra`` tells *this
+        class offers no such correction* from *it was not requested* by whether
+        the attribute exists, so a conditional assignment would turn the second
+        message into the first.
+
+        Parameters
+        ----------
+        cosmic_rays : dict or None
+            Forwarded to :func:`processing.remove_cosmic_rays`; ``None``
+            disables the repair.
+        bg_region_nm, bg_region_eV : tuple or None
+            At most one, already checked by
+            :meth:`_check_spectral_arguments`.
+        stacklevel : int
+            Depth for the warnings raised here, **counted from inside this
+            method**, so a caller reached through one more frame than
+            ``__init__`` passes one more.  Measured, not read off the ``def``
+            lines.
+        """
+        # Read back what _bind_aux_spectra recorded.  Bound to locals so the
+        # ladder below is the same text it was when it sat inline in __init__.
+        apply_jacobian = self.apply_jacobian
+        contrast       = self.contrast_mode
 
         # --- Resolve background window to nm (always work in wavelength space) ---
         if bg_region_eV is not None:
@@ -4348,7 +4419,7 @@ class AttoCubeSpectralSweep(_Sweep):
                 "rather than a flat offset, which inflates fitted amplitude "
                 "and FWHM. energy_spectra_pre_jacobian holds the file's counts on "
                 "the energy axis with the Jacobian left off.",
-                UserWarning, stacklevel=3,
+                UserWarning, stacklevel=stacklevel,
             )
 
         # --- Cosmic rays, ahead of every other correction ----------------------
@@ -4450,6 +4521,7 @@ class AttoCubeSpectralSweep(_Sweep):
             self.energy_contrast = self._build_energy_spectra(
                 self.contrast, self.wavelength, _sort_idx, apply_jacobian=False
             )
+
 
     # --- Private helpers ---------------------------------------------------
 
