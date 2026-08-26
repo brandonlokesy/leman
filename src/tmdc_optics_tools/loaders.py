@@ -3711,20 +3711,663 @@ class _Sweep:
 
 
 # ---------------------------------------------------------------------------
-# AttoCubeSpectralSweep
+# _SpectralSweep — shared machinery
 # ---------------------------------------------------------------------------
 
 # Accepted keys of the `cosmic_rays=` declaration, read off the function they are
 # forwarded to so the two cannot drift apart as that signature grows.  `spectra`
-# is the array being loaded and `axis` is fixed by this class's
-# (n_pixels, n_sweeps) convention, so neither is the caller's to set — passing an
-# axis would transpose the detection without changing the stored shape.
+# is the array being loaded and `axis` is fixed by the
+# (n_pixels, n_sweeps) convention every spectral sweep holds to, so neither is
+# the caller's to set — passing an axis would transpose the detection
+# without changing the stored shape.
 _COSMIC_RAY_KEYS = frozenset(
     inspect.signature(processing.remove_cosmic_rays).parameters
 ) - {"spectra", "axis"}
 
 
-class AttoCubeSpectralSweep(_Sweep):
+class _SpectralSweep(_Sweep):
+    """
+    Shared machinery for a sweep of spectra, whatever wrote the file.
+
+    Sits between :class:`_Sweep`, which holds everything independent of what
+    the measured axis *is*, and a concrete loader, which holds everything about
+    one instrument's export.  What lives here is the part that is neither: a
+    wavelength axis, its conjugate energy axis, the correction ladder built on
+    both, and the accessors that pick a pixel window or a single column out of
+    them.  None of it depends on how the file was laid out.
+
+    Not constructed directly, and it defines **no** ``__init__``.  A concrete
+    class writes its own, because the order of the steps is load-bearing and a
+    reader should be able to see it rather than infer it from a template
+    method::
+
+        self._check_spectral_arguments(bg_region_nm, bg_region_eV, cosmic_rays)
+        payload = self._decode_and_describe(path, spectra_type=..., ...)
+        self.wavelength = payload["wavelength"]
+        # ... set the signal array, then _validate_payload()
+        self._bind_aux_spectra(bg_spectrum, reference, reference_scale,
+                               contrast, apply_jacobian)
+        self._bind_sweep_axis(sweep, sweep_label, sweep_unit)
+        self._bind_nesting(fast_sweep, slow_sweep, ...)
+        self._build_correction_ladder(cosmic_rays, bg_region_nm,
+                                      bg_region_eV, stacklevel=4)
+
+    That signature is also why it has no ``__init__`` to inherit: a concrete
+    class may take arguments no other one does, and an inherited signature
+    would render above a parameter table describing arguments it does not show.
+
+    What a concrete class must supply
+    ---------------------------------
+    ``_LAYOUT_KIND``
+        Which export layout it accepts.
+    ``_CURATED``, ``_SIBLING_CURRENT``
+        Its instrument's rows; see :class:`_Sweep`.
+    ``_decode_csv``
+        A decoder returning the payload contract.
+    ``_validate_payload``
+        Whatever self-consistency check its own arrays need.
+    ``__init__``
+        The sequence above, plus any argument only it takes.
+    """
+
+    # True of any sweep of spectra; ``_LAYOUT_KIND`` is not, and stays on the
+    # instrument class that knows which file layout it reads.
+    _AXIS_ATTR   = "wavelength"
+    _SIGNAL_ATTR = "spectra"
+    _POINT_NOUN  = "pixels"
+
+    # --- The construction steps, in the order __init__ calls them ----------
+
+    def _check_spectral_arguments(
+        self, bg_region_nm, bg_region_eV, cosmic_rays,
+    ) -> None:
+        """
+        Reject a mistyped argument before the file is read.
+
+        Raises
+        ------
+        ValueError
+            If both background windows are given, or ``cosmic_rays`` carries a
+            key :func:`processing.remove_cosmic_rays` does not accept.
+        """
+        # Both checks precede the read: an export is large enough that a mistyped
+        # argument should not cost the decode before it is reported.
+        if bg_region_nm is not None and bg_region_eV is not None:
+            raise ValueError(
+                "Provide at most one of bg_region_nm or bg_region_eV, not both."
+            )
+        if cosmic_rays is not None:
+            unknown = set(cosmic_rays) - _COSMIC_RAY_KEYS
+            if unknown:
+                raise ValueError(
+                    f"cosmic_rays received unknown key(s) {sorted(unknown)}. "
+                    f"Accepted: {sorted(_COSMIC_RAY_KEYS)} — these are forwarded "
+                    f"to processing.remove_cosmic_rays, whose 'spectra' and "
+                    f"'axis' are set by the loader. Pass cosmic_rays={{}} to "
+                    f"accept every default."
+                )
+
+
+    def _bind_aux_spectra(
+        self, bg_spectrum, reference, reference_scale, contrast, apply_jacobian,
+    ) -> None:
+        """
+        Record the correction flags and resolve the auxiliary spectra.
+
+        Called before the sweep axis is bound, because resolving an auxiliary
+        spectrum can fail on a grid mismatch and that is the more useful error
+        of the two to see first.
+        """
+        self.apply_jacobian  = apply_jacobian
+        self.contrast_mode   = contrast
+        self.reference_scale = reference_scale
+
+        # Auxiliary spectra, resolved onto this scan's own wavelength grid.
+        self.bg_spectrum = self._resolve_aux_spectrum(bg_spectrum, "bg_spectrum")
+        self.reference   = self._resolve_aux_spectrum(reference, "reference")
+        if self.reference is not None and reference_scale is not None:
+            self.reference = self.reference * float(reference_scale)
+
+
+    def _build_correction_ladder(
+        self, cosmic_rays, bg_region_nm, bg_region_eV, *, stacklevel: int,
+    ) -> None:
+        """
+        Build every rung of the correction ladder, on both axes.
+
+        Reads :attr:`spectra` and :attr:`wavelength`, which the caller has
+        already set, and :attr:`apply_jacobian` / :attr:`contrast_mode`, which
+        :meth:`_bind_aux_spectra` has already recorded.  Every rung is assigned
+        unconditionally, ``None`` included: ``_resolve_spectra`` tells *this
+        class offers no such correction* from *it was not requested* by whether
+        the attribute exists, so a conditional assignment would turn the second
+        message into the first.
+
+        Parameters
+        ----------
+        cosmic_rays : dict or None
+            Forwarded to :func:`processing.remove_cosmic_rays`; ``None``
+            disables the repair.
+        bg_region_nm, bg_region_eV : tuple or None
+            At most one, already checked by
+            :meth:`_check_spectral_arguments`.
+        stacklevel : int
+            Depth for the warnings raised here, **counted from inside this
+            method**, so a caller reached through one more frame than
+            ``__init__`` passes one more.  Measured, not read off the ``def``
+            lines.
+        """
+        # Read back what _bind_aux_spectra recorded.  Bound to locals so the
+        # ladder below is the same text it was when it sat inline in __init__.
+        apply_jacobian = self.apply_jacobian
+        contrast       = self.contrast_mode
+
+        # --- Resolve background window to nm (always work in wavelength space) ---
+        if bg_region_eV is not None:
+            # E and λ are inversely related: higher E → shorter λ, so the
+            # nm interval is (λ(E_max), λ(E_min)) — order flips.
+            wl_lo = HC_EV_NM / bg_region_eV[1]   # E_max → λ_min
+            wl_hi = HC_EV_NM / bg_region_eV[0]   # E_min → λ_max
+            self.bg_region_nm = (wl_lo, wl_hi)
+        else:
+            self.bg_region_nm = bg_region_nm      # may be None
+
+        # The Jacobian multiplies by λ², so it turns a constant dark pedestal
+        # into a curve rather than leaving it as an offset a fit can absorb.
+        # Both background mechanisms run in wavelength space below, so either
+        # one satisfies this; neither means the pedestal is already curved on
+        # every energy-axis rung.
+        if apply_jacobian and self.bg_region_nm is None and self.bg_spectrum is None:
+            warnings.warn(
+                "apply_jacobian=True with no background subtraction: pass "
+                "bg_region_nm / bg_region_eV or bg_spectrum. The Jacobian "
+                "multiplies by λ²/hc, so an un-subtracted dark pedestal B "
+                "becomes B·λ²/hc — a baseline curving up towards the red "
+                "rather than a flat offset, which inflates fitted amplitude "
+                "and FWHM. energy_spectra_pre_jacobian holds the file's counts on "
+                "the energy axis with the Jacobian left off.",
+                UserWarning, stacklevel=stacklevel,
+            )
+
+        # --- Cosmic rays, ahead of every other correction ----------------------
+        # First because both of the corrections below read the counts as if they
+        # were signal: a spike inside the bg_region window pulls the pedestal
+        # estimate up, and one in either array of a contrast biases the ratio
+        # non-linearly.  In wavelength space because the 3-point Laplacian the
+        # detection is built on assumes uniform sample spacing, which the detector
+        # axis has and the energy axis does not.
+        self.cosmic_rays = dict(cosmic_rays) if cosmic_rays is not None else None
+        if cosmic_rays is None:
+            self.spectra_cr      = None
+            self.cosmic_ray_mask = None
+        else:
+            self.spectra_cr, self.cosmic_ray_mask = processing.remove_cosmic_rays(
+                self.spectra, axis=0, **cosmic_rays
+            )
+
+        # What the corrections below read: the repaired counts where a repair was
+        # asked for, the file's own otherwise.  `spectra` is never reassigned, so a
+        # repair adds a rung to the ladder rather than replacing one.
+        signal = self.spectra if self.spectra_cr is None else self.spectra_cr
+
+        # --- Build energy axis and energy-space spectra ---
+        self.energy       = HC_EV_NM / self.wavelength              # eV, descending at this point
+        _sort_idx         = np.argsort(self.energy)                 # ascending energy sort index
+        self.energy       = self.energy[_sort_idx]                  # eV, ascending
+
+        # The first rung, on both axes: the file's own counts, uncorrected. Built
+        # from `spectra` rather than `signal` so that each rung has one meaning —
+        # a repair is `energy_spectra_cr` below, not a silent change of this one.
+        self.energy_spectra = self._build_energy_spectra(
+            self.spectra, self.wavelength, _sort_idx, apply_jacobian
+        )
+
+        # energy_spectra_pre_jacobian: the same rung with no Jacobian, whatever
+        # apply_jacobian says.  Identical object when it is off; a separate array
+        # when it is on so both representations are always available.  The other
+        # rungs need no pre-Jacobian variant of their own: their wavelength-space
+        # arrays hold exactly those values.
+        if apply_jacobian:
+            self.energy_spectra_pre_jacobian = self._build_energy_spectra(
+                self.spectra, self.wavelength, _sort_idx, apply_jacobian=False
+            )
+        else:
+            self.energy_spectra_pre_jacobian = self.energy_spectra
+
+        # The repair rung on the energy axis, mirroring spectra_cr.
+        if self.spectra_cr is None:
+            self.energy_spectra_cr = None
+        else:
+            self.energy_spectra_cr = self._build_energy_spectra(
+                self.spectra_cr, self.wavelength, _sort_idx, apply_jacobian
+            )
+
+        # --- Wavelength-space corrections, in the order the physics requires ---
+        # 1. the bg_region window mean
+        # 2. a measured background spectrum.
+        # Both must precede any ratio: a pedestal in either array biases a contrast
+        # non-linearly, and both must precede the Jacobian (a flat pedestal B
+        # becomes B·λ²/hc — curved, not flat — in energy space).
+        corrected = signal
+        if self.bg_region_nm is not None:
+            corrected = subtract_background(
+                corrected,
+                bg_region = self.bg_region_nm,
+                x         = self.wavelength,
+                axis      = 0,
+            )
+        if self.bg_spectrum is not None:
+            corrected = processing.subtract_spectrum(
+                corrected, self.bg_spectrum, axis=0)
+
+        # The background rung, on both axes.  Compared against `signal`, not
+        # `spectra`, so a cosmic-ray repair on its own does not masquerade as a
+        # background subtraction; both stay None in that case and `best_*` falls
+        # back to the repair rung.
+        if corrected is not signal:
+            self.spectra_bg        = corrected
+            self.energy_spectra_bg = self._build_energy_spectra(
+                corrected, self.wavelength, _sort_idx, apply_jacobian
+            )
+        else:
+            self.spectra_bg        = None
+            self.energy_spectra_bg = None
+
+        # --- Contrast against a reference spectrum -------------------------
+        if self.reference is None:
+            self.contrast = None
+            self.energy_contrast = None
+            self.reference_guarded = None
+        else:
+            self.contrast, self.reference_guarded = processing.spectral_contrast(
+                corrected, self.reference, mode=contrast, axis=0,
+            )
+            # The Jacobian is NOT applied here, whatever apply_jacobian says:
+            # (S·λ²/hc)/(R·λ²/hc) = S/R, so it cancels identically in a ratio.
+            # Applying it to the numerator alone would distort the contrast.
+            self.energy_contrast = self._build_energy_spectra(
+                self.contrast, self.wavelength, _sort_idx, apply_jacobian=False
+            )
+
+
+    # --- Private helpers ---------------------------------------------------
+
+    @staticmethod
+    def _build_energy_spectra(
+        spectra        : np.ndarray,
+        wavelength_nm  : np.ndarray,
+        sort_idx       : np.ndarray,
+        apply_jacobian : bool,
+    ) -> np.ndarray:
+        """
+        Convert raw wavelength-space spectra to an energy-axis array.
+
+        Parameters
+        ----------
+        spectra : np.ndarray, shape (n_pixels, n_sweeps)
+            Spectra in wavelength space (may already have BG subtracted).
+        wavelength_nm : np.ndarray, shape (n_pixels,)
+            Wavelength axis in nm, matching ``spectra`` row order.
+        sort_idx : np.ndarray
+            Argsort indices that put the energy axis in ascending order.
+        apply_jacobian : bool
+            Whether to apply the ``λ²/hc`` density correction.
+
+        Returns
+        -------
+        np.ndarray, shape (n_pixels, n_sweeps)
+            Spectra on the ascending energy axis.
+        """
+        if apply_jacobian:
+            out = jacobian_correction_wvl2E(spectra, wavelength_nm, axis=0)
+        else:
+            out = spectra.copy()
+        return out[sort_idx, :]
+
+    def _resolve_aux_spectrum(self, spec, name: str) -> np.ndarray:
+        """
+        Resolve an auxiliary spectrum onto this scan's wavelength grid.
+
+        Accepts a path, anything exposing ``wavelength`` plus ``best_spectra``
+        (a :class:`SingleSpectrum`, or another sweep's single column), or a bare
+        ``(n_pixels,)`` array — the same duck-typing the image loaders use for
+        ``laser_ref``.
+
+        A grid **mismatch raises** rather than interpolating: resampling changes
+        the numbers and smooths the data, so it is a correction and cannot be a
+        default.  A bare array is accepted precisely so a caller who has aligned
+        the two axes themselves has a route in, with no extra API.
+        """
+        if spec is None:
+            return None
+
+        if isinstance(spec, (str, Path)):
+            spec = SingleSpectrum(str(spec))
+
+        wavelength = getattr(spec, "wavelength", None)
+        if wavelength is None:
+            values = np.asarray(spec, dtype=float)
+            if values.ndim != 1 or values.size != self.wavelength.size:
+                raise ValueError(
+                    f"{name} was given as a bare array of shape {values.shape}, "
+                    f"which does not match this scan's {self.wavelength.size}-pixel "
+                    f"wavelength axis. Pass a SingleSpectrum or a path to let the "
+                    f"axes be checked."
+                )
+            return values
+
+        values = np.asarray(getattr(spec, "best_spectra", spec.spectra), dtype=float)
+        wavelength = np.asarray(wavelength, dtype=float)
+        if wavelength.shape != self.wavelength.shape or not np.allclose(
+                wavelength, self.wavelength, rtol=1e-6, atol=0.0):
+            raise ValueError(
+                f"{name} is on a different wavelength axis from this scan "
+                f"({wavelength.size} points spanning "
+                f"{wavelength.min():.3f}–{wavelength.max():.3f} nm, against "
+                f"{self.wavelength.size} points spanning "
+                f"{self.wavelength.min():.3f}–{self.wavelength.max():.3f} nm). "
+                f"They are not resampled automatically, because interpolating "
+                f"changes the numbers and smooths the data. Resample it yourself "
+                f"and pass the resulting array as {name}=."
+            )
+        return values
+
+    @property
+    def n_pixels(self) -> int:
+        """Number of spectrometer pixels — :attr:`n_points` under its optical name."""
+        return self.n_points
+
+    # --- What the spectra are ----------------------------------------------
+
+    @property
+    def best_spectra(self) -> np.ndarray:
+        """
+        Most-corrected wavelength-axis spectra available — the counterpart of
+        :attr:`best_energy_spectra`, returning the same rung of the ladder.
+
+        Returns :attr:`spectra_bg` when a background was supplied at load time,
+        :attr:`spectra_cr` when a cosmic-ray repair was declared without one, and
+        :attr:`spectra` otherwise, so downstream code need not know which.
+
+        Never returns the contrast, even when a *reference* was supplied: that is
+        a different quantity rather than a better-corrected one, and it is
+        negative-going, which peak fits and intensity colour bars both misread.
+        Use :attr:`contrast`.
+        """
+        for rung in (self.spectra_bg, self.spectra_cr):
+            if rung is not None:
+                return rung
+        return self.spectra
+
+    @property
+    def best_energy_spectra(self) -> np.ndarray:
+        """
+        Most-corrected energy-axis spectra available — the counterpart of
+        :attr:`best_spectra`, returning the same rung of the ladder.
+
+        Returns :attr:`energy_spectra_bg` when a background was supplied at load
+        time, :attr:`energy_spectra_cr` when a cosmic-ray repair was declared
+        without one, and :attr:`energy_spectra` otherwise, so downstream code need
+        not know which.
+
+        Never returns the contrast, even when a *reference* was supplied: that is
+        a different quantity rather than a better-corrected one, and it is
+        negative-going, which peak fits and intensity colour bars both misread.
+        Use :attr:`energy_contrast`, or ``spectra_source="contrast"`` in
+        :mod:`~tmdc_optics_tools.plotting`.
+        """
+        for rung in (self.energy_spectra_bg, self.energy_spectra_cr):
+            if rung is not None:
+                return rung
+        return self.energy_spectra
+
+    @property
+    def contrast_label(self) -> str:
+        """
+        Y-axis label for :attr:`contrast` / :attr:`energy_contrast`.
+
+        Independent of :attr:`signal_label`, because the contrast is a *derived*
+        quantity: a scan of ``spectra_type="R"`` keeps reporting "Reflected
+        intensity (counts)" for its raw spectra while its contrast is labelled
+        ΔR/R₀.
+        """
+        if self.contrast_mode == "ratio":
+            return r"$R/R_0$"
+        name, unit = SIGNAL_LABELS["RC"]
+        return f"{name} ({unit})" if unit else name
+
+    # --- Picking a window out of the spectral axis ----------------------------
+
+    def pixel_slice(self, x_range: tuple, *, x_axis: str = "energy") -> slice:
+        """
+        Positions of the spectrometer pixels lying inside a spectral window.
+
+        Gives back *where* the window is rather than the data inside it, so that
+        one slice cuts a spectrum and its axis together and the two cannot drift
+        apart — which is what a fit over part of a spectrum needs:
+
+        >>> px   = scan.pixel_slice((1.63, 1.72))            # doctest: +SKIP
+        >>> x, y = scan.energy[px], scan.get_spectrum_at(value=50)[px]
+
+        Parameters
+        ----------
+        x_range : tuple of (lo, hi)
+            The window, in the units of *x_axis* — eV for ``"energy"``, nm for
+            ``"wavelength"``.  Bounds are inclusive, and their order carries no
+            information: ``(1.72, 1.63)`` is the same window as ``(1.63, 1.72)``.
+        x_axis : {"energy", "wavelength"}
+            Which spectral axis *x_range* is given on.  It also fixes what the
+            result may index, since the two orderings are reversed with respect
+            to each other: :attr:`energy` and every ``energy_*`` array take an
+            ``"energy"`` slice, while :attr:`wavelength`, the ``spectra*`` rungs
+            and :attr:`contrast` take a ``"wavelength"`` one.  A slice from the
+            wrong axis returns a real but wrong window.
+
+        Returns
+        -------
+        slice
+            Indexes the pixel axis — axis 0 of the spectra arrays, and the whole
+            of :attr:`energy` / :attr:`wavelength`.  A slice rather than a mask,
+            so indexing with it gives a view rather than a copy.
+
+        Raises
+        ------
+        ValueError
+            If no pixel lies inside the window, the message giving the span of
+            the axis.  An empty window is refused here rather than being left to
+            surface as an empty spectrum inside a fit.
+        ValueError
+            If the axis is not monotonic, so that the window is not one
+            consecutive run of pixels and cannot be expressed as a slice.
+        TypeError
+            If *x_range* is not a pair of numbers.
+
+        Warns
+        -----
+        UserWarning
+            When a bound lies beyond the end of the axis by more than half a
+            pixel, so the window returned is narrower than the one asked for.
+
+        See Also
+        --------
+        nearest_index : the same idea on the sweep axis, one point rather than a
+            run of them.
+
+        Examples
+        --------
+        >>> scan.pixel_slice((1.63, 1.72))                     # doctest: +SKIP
+        slice(400, 730, None)
+        >>> scan.pixel_slice((720, 760), x_axis="wavelength")  # doctest: +SKIP
+        slice(210, 540, None)
+        """
+        _, unit = _x_axis_name_unit(x_axis, what="pixel_slice()")
+        values  = self.energy if x_axis == "energy" else self.wavelength
+        return processing._window_slice(values, x_range, axis=x_axis, unit=unit,
+                                       what="pixel_slice()", stacklevel=3)
+
+    # --- Picking spectra out of the sweep ------------------------------------
+
+    def get_spectrum_at(self, value: float = None, *,
+                        axis   : str   = "sweep",
+                        fast   : float = None,
+                        slow   : float = None,
+                        source : str   = "best",
+                        x_axis : str   = "energy") -> np.ndarray:
+        """
+        Spectra at the sweep coordinate closest to the value(s) given.
+
+        **The rank of the result depends on how much you specify.**  Pinning
+        every axis gives one spectrum, ``(n_pixels,)``; leaving one free gives
+        the line of spectra along it, ``(n_pixels, n)`` with the swept dimension
+        last, as everywhere else in the package.
+
+        Parameters
+        ----------
+        value : float, optional
+            Coordinate on the sweep axis.  For a flat sweep only; a nest is
+            addressed with *fast* and *slow*.
+        axis : str
+            Which quantity *value* is read against, spelled as ``sweep=`` spells
+            it: a registry key such as ``"top_voltage"`` or a raw row label such
+            as ``"V_A"``.  The default searches the declared sweep axis.  Use it
+            when a sweep is declared in one coordinate and you want a point in
+            another — a field sweep driven by both gates at a fixed ratio can be
+            addressed by ``axis="top_voltage"``.  Not combinable with *fast* or
+            *slow*: to address a nest by another quantity, declare the nest in
+            it.
+        fast, slow : float, optional
+            Coordinates on the nest axes.  Give both for a single spectrum, or
+            one to hold that axis and take every point of the other.
+        source : str
+            Which correction state to read: ``"best"`` (the most-corrected state
+            available), ``"raw"``, ``"cr"``, ``"bg"``, ``"contrast"``, or
+            ``"pre_jacobian"`` (energy axis only).
+        x_axis : {"energy", "wavelength"}
+            Which spectral ordering *source* is served on.  The returned spectra
+            run along :attr:`energy` or :attr:`wavelength` accordingly.
+
+        Returns
+        -------
+        np.ndarray
+            A **view** into the source array, never a copy, so the
+            never-mutate rule reaches it.  Strided rather than contiguous, as
+            any column selection out of a row-major array is; anything
+            downstream that demands contiguity will copy it.
+
+        Raises
+        ------
+        ValueError
+            If *value* is given for a nested sweep, or *fast*/*slow* for a flat
+            one, or if neither is given.  For the whole grid, use :meth:`as_grid`.
+        ValueError
+            If a coordinate names more than one sweep point, since returning one
+            of them would drop the rest without saying so.  Every quantity of a
+            nest repeats, so this is what an undeclared nest looks like from
+            here; the message says what to declare.  :meth:`nearest_index` warns
+            instead of raising, because a single index is all it can return.
+
+        Warns
+        -----
+        UserWarning
+            When a requested coordinate is further than half a step from any real
+            point — see :meth:`nearest_index`.
+
+        See Also
+        --------
+        get_spectrum_by_index : the same selection by integer position.
+        nearest_index : the index alone, for composing against another array.
+        as_grid : the whole sweep reshaped onto the nest.
+
+        Examples
+        --------
+        >>> scan.get_spectrum_at(2.5).shape                  # doctest: +SKIP
+        (1340,)
+        >>> scan.get_spectrum_at(15.0, axis="top_voltage").shape  # doctest: +SKIP
+        (1340,)
+        >>> scan.get_spectrum_at(fast=3.0, slow=1.0).shape   # doctest: +SKIP
+        (1340,)
+        >>> scan.get_spectrum_at(fast=3.0).shape             # doctest: +SKIP
+        (1340, 51)
+        """
+        selector = self._sweep_selector(
+            value, axis=axis, fast=fast, slow=slow, by_value=True,
+            what="get_spectrum_at()")
+        return _resolve_spectra(self, source, x_axis)[:, selector]
+
+    def get_spectrum_by_index(self, index: int = None, *,
+                              fast   : int = None,
+                              slow   : int = None,
+                              source : str = "best",
+                              x_axis : str = "energy") -> np.ndarray:
+        """
+        Spectra at integer sweep positions — :meth:`get_spectrum_at` by index.
+
+        Same arguments, same rank rules and same return contract, except that
+        the coordinates are positions rather than values, so nothing is searched
+        for and nothing is warned about.  Negative positions count from the end,
+        as elsewhere in Python.
+
+        Parameters
+        ----------
+        index : int, optional
+            Position on the sweep axis.  For a flat sweep only.
+        fast, slow : int, optional
+            Positions on the nest axes, ``0 <= i < n_fast`` / ``n_slow``.
+        source, x_axis
+            As :meth:`get_spectrum_at`.
+
+        Returns
+        -------
+        np.ndarray
+            ``(n_pixels,)`` with every axis pinned, else ``(n_pixels, n)``.
+            A view, as :meth:`get_spectrum_at`.
+
+        Raises
+        ------
+        IndexError
+            If a position is out of range for its axis.
+        """
+        selector = self._sweep_selector(
+            index, fast=fast, slow=slow, by_value=False,
+            what="get_spectrum_by_index()")
+        return _resolve_spectra(self, source, x_axis)[:, selector]
+
+    # --- Dunder methods ----------------------------------------------------
+
+    def _repr_axis_lines(self, w: int) -> list:
+        return [
+            f"  {'λ range':<{w}}: "
+            f"{self.wavelength.min():.1f} – {self.wavelength.max():.1f} nm",
+            f"  {'Energy range':<{w}}: "
+            f"{self.energy.min():.3f} – {self.energy.max():.3f} eV",
+        ]
+
+    def _repr_extra_lines(self, w: int) -> list:
+        lines = []
+        if self.cosmic_ray_mask is not None:
+            n_flagged = int(self.cosmic_ray_mask.sum())
+            lines.append(
+                f"  {'Cosmic rays':<{w}}: {n_flagged} pixel"
+                f"{'' if n_flagged == 1 else 's'} replaced"
+            )
+        if self.bg_region_nm is not None:
+            lines.append(
+                f"  {'BG region':<{w}}: "
+                f"{self.bg_region_nm[0]:.1f} \u2013 {self.bg_region_nm[1]:.1f} nm"
+            )
+        lines.append(
+            f"  {'Jacobian':<{w}}: "
+            f"{'applied' if self.apply_jacobian else 'not applied'}"
+        )
+        return lines
+
+
+# ---------------------------------------------------------------------------
+# AttoCubeSpectralSweep
+# ---------------------------------------------------------------------------
+
+
+class AttoCubeSpectralSweep(_SpectralSweep):
     """
     A sweep of spectra from the AttoCube cryogenic confocal.
 
@@ -4213,9 +4856,6 @@ class AttoCubeSpectralSweep(_Sweep):
     # The block *shape* is read from the header (see _read_block_layout); this is
     # the layout this class is willing to accept.
     _LAYOUT_KIND = "spectral"
-    _AXIS_ATTR   = "wavelength"
-    _SIGNAL_ATTR = "spectra"
-    _POINT_NOUN  = "pixels"
 
     # Which rows this instrument writes, and which of them pair a bias with a
     # current.  Shared with AttoCubeTRPLSweep: one system, one pair of tables.
@@ -4309,254 +4949,6 @@ class AttoCubeSpectralSweep(_Sweep):
             cosmic_rays, bg_region_nm, bg_region_eV, stacklevel=4,
         )
 
-    # --- The construction steps, in the order __init__ calls them ----------
-
-    def _check_spectral_arguments(
-        self, bg_region_nm, bg_region_eV, cosmic_rays,
-    ) -> None:
-        """
-        Reject a mistyped argument before the file is read.
-
-        Raises
-        ------
-        ValueError
-            If both background windows are given, or ``cosmic_rays`` carries a
-            key :func:`processing.remove_cosmic_rays` does not accept.
-        """
-        # Both checks precede the read: an export is large enough that a mistyped
-        # argument should not cost the decode before it is reported.
-        if bg_region_nm is not None and bg_region_eV is not None:
-            raise ValueError(
-                "Provide at most one of bg_region_nm or bg_region_eV, not both."
-            )
-        if cosmic_rays is not None:
-            unknown = set(cosmic_rays) - _COSMIC_RAY_KEYS
-            if unknown:
-                raise ValueError(
-                    f"cosmic_rays received unknown key(s) {sorted(unknown)}. "
-                    f"Accepted: {sorted(_COSMIC_RAY_KEYS)} — these are forwarded "
-                    f"to processing.remove_cosmic_rays, whose 'spectra' and "
-                    f"'axis' are set by the loader. Pass cosmic_rays={{}} to "
-                    f"accept every default."
-                )
-
-
-    def _bind_aux_spectra(
-        self, bg_spectrum, reference, reference_scale, contrast, apply_jacobian,
-    ) -> None:
-        """
-        Record the correction flags and resolve the auxiliary spectra.
-
-        Called before the sweep axis is bound, because resolving an auxiliary
-        spectrum can fail on a grid mismatch and that is the more useful error
-        of the two to see first.
-        """
-        self.apply_jacobian  = apply_jacobian
-        self.contrast_mode   = contrast
-        self.reference_scale = reference_scale
-
-        # Auxiliary spectra, resolved onto this scan's own wavelength grid.
-        self.bg_spectrum = self._resolve_aux_spectrum(bg_spectrum, "bg_spectrum")
-        self.reference   = self._resolve_aux_spectrum(reference, "reference")
-        if self.reference is not None and reference_scale is not None:
-            self.reference = self.reference * float(reference_scale)
-
-
-    def _build_correction_ladder(
-        self, cosmic_rays, bg_region_nm, bg_region_eV, *, stacklevel: int,
-    ) -> None:
-        """
-        Build every rung of the correction ladder, on both axes.
-
-        Reads :attr:`spectra` and :attr:`wavelength`, which the caller has
-        already set, and :attr:`apply_jacobian` / :attr:`contrast_mode`, which
-        :meth:`_bind_aux_spectra` has already recorded.  Every rung is assigned
-        unconditionally, ``None`` included: ``_resolve_spectra`` tells *this
-        class offers no such correction* from *it was not requested* by whether
-        the attribute exists, so a conditional assignment would turn the second
-        message into the first.
-
-        Parameters
-        ----------
-        cosmic_rays : dict or None
-            Forwarded to :func:`processing.remove_cosmic_rays`; ``None``
-            disables the repair.
-        bg_region_nm, bg_region_eV : tuple or None
-            At most one, already checked by
-            :meth:`_check_spectral_arguments`.
-        stacklevel : int
-            Depth for the warnings raised here, **counted from inside this
-            method**, so a caller reached through one more frame than
-            ``__init__`` passes one more.  Measured, not read off the ``def``
-            lines.
-        """
-        # Read back what _bind_aux_spectra recorded.  Bound to locals so the
-        # ladder below is the same text it was when it sat inline in __init__.
-        apply_jacobian = self.apply_jacobian
-        contrast       = self.contrast_mode
-
-        # --- Resolve background window to nm (always work in wavelength space) ---
-        if bg_region_eV is not None:
-            # E and λ are inversely related: higher E → shorter λ, so the
-            # nm interval is (λ(E_max), λ(E_min)) — order flips.
-            wl_lo = HC_EV_NM / bg_region_eV[1]   # E_max → λ_min
-            wl_hi = HC_EV_NM / bg_region_eV[0]   # E_min → λ_max
-            self.bg_region_nm = (wl_lo, wl_hi)
-        else:
-            self.bg_region_nm = bg_region_nm      # may be None
-
-        # The Jacobian multiplies by λ², so it turns a constant dark pedestal
-        # into a curve rather than leaving it as an offset a fit can absorb.
-        # Both background mechanisms run in wavelength space below, so either
-        # one satisfies this; neither means the pedestal is already curved on
-        # every energy-axis rung.
-        if apply_jacobian and self.bg_region_nm is None and self.bg_spectrum is None:
-            warnings.warn(
-                "apply_jacobian=True with no background subtraction: pass "
-                "bg_region_nm / bg_region_eV or bg_spectrum. The Jacobian "
-                "multiplies by λ²/hc, so an un-subtracted dark pedestal B "
-                "becomes B·λ²/hc — a baseline curving up towards the red "
-                "rather than a flat offset, which inflates fitted amplitude "
-                "and FWHM. energy_spectra_pre_jacobian holds the file's counts on "
-                "the energy axis with the Jacobian left off.",
-                UserWarning, stacklevel=stacklevel,
-            )
-
-        # --- Cosmic rays, ahead of every other correction ----------------------
-        # First because both of the corrections below read the counts as if they
-        # were signal: a spike inside the bg_region window pulls the pedestal
-        # estimate up, and one in either array of a contrast biases the ratio
-        # non-linearly.  In wavelength space because the 3-point Laplacian the
-        # detection is built on assumes uniform sample spacing, which the detector
-        # axis has and the energy axis does not.
-        self.cosmic_rays = dict(cosmic_rays) if cosmic_rays is not None else None
-        if cosmic_rays is None:
-            self.spectra_cr      = None
-            self.cosmic_ray_mask = None
-        else:
-            self.spectra_cr, self.cosmic_ray_mask = processing.remove_cosmic_rays(
-                self.spectra, axis=0, **cosmic_rays
-            )
-
-        # What the corrections below read: the repaired counts where a repair was
-        # asked for, the file's own otherwise.  `spectra` is never reassigned, so a
-        # repair adds a rung to the ladder rather than replacing one.
-        signal = self.spectra if self.spectra_cr is None else self.spectra_cr
-
-        # --- Build energy axis and energy-space spectra ---
-        self.energy       = HC_EV_NM / self.wavelength              # eV, descending at this point
-        _sort_idx         = np.argsort(self.energy)                 # ascending energy sort index
-        self.energy       = self.energy[_sort_idx]                  # eV, ascending
-
-        # The first rung, on both axes: the file's own counts, uncorrected. Built
-        # from `spectra` rather than `signal` so that each rung has one meaning —
-        # a repair is `energy_spectra_cr` below, not a silent change of this one.
-        self.energy_spectra = self._build_energy_spectra(
-            self.spectra, self.wavelength, _sort_idx, apply_jacobian
-        )
-
-        # energy_spectra_pre_jacobian: the same rung with no Jacobian, whatever
-        # apply_jacobian says.  Identical object when it is off; a separate array
-        # when it is on so both representations are always available.  The other
-        # rungs need no pre-Jacobian variant of their own: their wavelength-space
-        # arrays hold exactly those values.
-        if apply_jacobian:
-            self.energy_spectra_pre_jacobian = self._build_energy_spectra(
-                self.spectra, self.wavelength, _sort_idx, apply_jacobian=False
-            )
-        else:
-            self.energy_spectra_pre_jacobian = self.energy_spectra
-
-        # The repair rung on the energy axis, mirroring spectra_cr.
-        if self.spectra_cr is None:
-            self.energy_spectra_cr = None
-        else:
-            self.energy_spectra_cr = self._build_energy_spectra(
-                self.spectra_cr, self.wavelength, _sort_idx, apply_jacobian
-            )
-
-        # --- Wavelength-space corrections, in the order the physics requires ---
-        # 1. the bg_region window mean
-        # 2. a measured background spectrum.
-        # Both must precede any ratio: a pedestal in either array biases a contrast
-        # non-linearly, and both must precede the Jacobian (a flat pedestal B
-        # becomes B·λ²/hc — curved, not flat — in energy space).
-        corrected = signal
-        if self.bg_region_nm is not None:
-            corrected = subtract_background(
-                corrected,
-                bg_region = self.bg_region_nm,
-                x         = self.wavelength,
-                axis      = 0,
-            )
-        if self.bg_spectrum is not None:
-            corrected = processing.subtract_spectrum(
-                corrected, self.bg_spectrum, axis=0)
-
-        # The background rung, on both axes.  Compared against `signal`, not
-        # `spectra`, so a cosmic-ray repair on its own does not masquerade as a
-        # background subtraction; both stay None in that case and `best_*` falls
-        # back to the repair rung.
-        if corrected is not signal:
-            self.spectra_bg        = corrected
-            self.energy_spectra_bg = self._build_energy_spectra(
-                corrected, self.wavelength, _sort_idx, apply_jacobian
-            )
-        else:
-            self.spectra_bg        = None
-            self.energy_spectra_bg = None
-
-        # --- Contrast against a reference spectrum -------------------------
-        if self.reference is None:
-            self.contrast = None
-            self.energy_contrast = None
-            self.reference_guarded = None
-        else:
-            self.contrast, self.reference_guarded = processing.spectral_contrast(
-                corrected, self.reference, mode=contrast, axis=0,
-            )
-            # The Jacobian is NOT applied here, whatever apply_jacobian says:
-            # (S·λ²/hc)/(R·λ²/hc) = S/R, so it cancels identically in a ratio.
-            # Applying it to the numerator alone would distort the contrast.
-            self.energy_contrast = self._build_energy_spectra(
-                self.contrast, self.wavelength, _sort_idx, apply_jacobian=False
-            )
-
-
-    # --- Private helpers ---------------------------------------------------
-
-    @staticmethod
-    def _build_energy_spectra(
-        spectra        : np.ndarray,
-        wavelength_nm  : np.ndarray,
-        sort_idx       : np.ndarray,
-        apply_jacobian : bool,
-    ) -> np.ndarray:
-        """
-        Convert raw wavelength-space spectra to an energy-axis array.
-
-        Parameters
-        ----------
-        spectra : np.ndarray, shape (n_pixels, n_sweeps)
-            Spectra in wavelength space (may already have BG subtracted).
-        wavelength_nm : np.ndarray, shape (n_pixels,)
-            Wavelength axis in nm, matching ``spectra`` row order.
-        sort_idx : np.ndarray
-            Argsort indices that put the energy axis in ascending order.
-        apply_jacobian : bool
-            Whether to apply the ``λ²/hc`` density correction.
-
-        Returns
-        -------
-        np.ndarray, shape (n_pixels, n_sweeps)
-            Spectra on the ascending energy axis.
-        """
-        if apply_jacobian:
-            out = jacobian_correction_wvl2E(spectra, wavelength_nm, axis=0)
-        else:
-            out = spectra.copy()
-        return out[sort_idx, :]
-
     # --- Decoding: one payload contract, one builder, two formats ----------
 
     @classmethod
@@ -4626,54 +5018,6 @@ class AttoCubeSpectralSweep(_Sweep):
             payload[out] = d[valid_px][:, cols[role][keep]]
         return payload
 
-    def _resolve_aux_spectrum(self, spec, name: str) -> np.ndarray:
-        """
-        Resolve an auxiliary spectrum onto this scan's wavelength grid.
-
-        Accepts a path, anything exposing ``wavelength`` plus ``best_spectra``
-        (a :class:`SingleSpectrum`, or another sweep's single column), or a bare
-        ``(n_pixels,)`` array — the same duck-typing the image loaders use for
-        ``laser_ref``.
-
-        A grid **mismatch raises** rather than interpolating: resampling changes
-        the numbers and smooths the data, so it is a correction and cannot be a
-        default.  A bare array is accepted precisely so a caller who has aligned
-        the two axes themselves has a route in, with no extra API.
-        """
-        if spec is None:
-            return None
-
-        if isinstance(spec, (str, Path)):
-            spec = SingleSpectrum(str(spec))
-
-        wavelength = getattr(spec, "wavelength", None)
-        if wavelength is None:
-            values = np.asarray(spec, dtype=float)
-            if values.ndim != 1 or values.size != self.wavelength.size:
-                raise ValueError(
-                    f"{name} was given as a bare array of shape {values.shape}, "
-                    f"which does not match this scan's {self.wavelength.size}-pixel "
-                    f"wavelength axis. Pass a SingleSpectrum or a path to let the "
-                    f"axes be checked."
-                )
-            return values
-
-        values = np.asarray(getattr(spec, "best_spectra", spec.spectra), dtype=float)
-        wavelength = np.asarray(wavelength, dtype=float)
-        if wavelength.shape != self.wavelength.shape or not np.allclose(
-                wavelength, self.wavelength, rtol=1e-6, atol=0.0):
-            raise ValueError(
-                f"{name} is on a different wavelength axis from this scan "
-                f"({wavelength.size} points spanning "
-                f"{wavelength.min():.3f}–{wavelength.max():.3f} nm, against "
-                f"{self.wavelength.size} points spanning "
-                f"{self.wavelength.min():.3f}–{self.wavelength.max():.3f} nm). "
-                f"They are not resampled automatically, because interpolating "
-                f"changes the numbers and smooths the data. Resample it yourself "
-                f"and pass the resulting array as {name}=."
-            )
-        return values
-
     def _validate_payload(self) -> None:
         """Check the decoded arrays are self-consistent before anything uses them."""
         # Check that the spectra is 2D and has at least one sweep point
@@ -4694,11 +5038,6 @@ class AttoCubeSpectralSweep(_Sweep):
         )
 
     @property
-    def n_pixels(self) -> int:
-        """Number of spectrometer pixels — :attr:`n_points` under its optical name."""
-        return self.n_points
-
-    @property
     def roi(self) -> int:
         """Which spectrometer ROI :attr:`spectra` points at (1 or 2)."""
         return self._roi
@@ -4715,273 +5054,11 @@ class AttoCubeSpectralSweep(_Sweep):
         """Deprecated alias for :attr:`sweep_axis_label`."""
         return self.sweep_axis_label
 
-    # --- What the spectra are ----------------------------------------------
-
-    @property
-    def best_spectra(self) -> np.ndarray:
-        """
-        Most-corrected wavelength-axis spectra available — the counterpart of
-        :attr:`best_energy_spectra`, returning the same rung of the ladder.
-
-        Returns :attr:`spectra_bg` when a background was supplied at load time,
-        :attr:`spectra_cr` when a cosmic-ray repair was declared without one, and
-        :attr:`spectra` otherwise, so downstream code need not know which.
-
-        Never returns the contrast, even when a *reference* was supplied: that is
-        a different quantity rather than a better-corrected one, and it is
-        negative-going, which peak fits and intensity colour bars both misread.
-        Use :attr:`contrast`.
-        """
-        for rung in (self.spectra_bg, self.spectra_cr):
-            if rung is not None:
-                return rung
-        return self.spectra
-
-    @property
-    def best_energy_spectra(self) -> np.ndarray:
-        """
-        Most-corrected energy-axis spectra available — the counterpart of
-        :attr:`best_spectra`, returning the same rung of the ladder.
-
-        Returns :attr:`energy_spectra_bg` when a background was supplied at load
-        time, :attr:`energy_spectra_cr` when a cosmic-ray repair was declared
-        without one, and :attr:`energy_spectra` otherwise, so downstream code need
-        not know which.
-
-        Never returns the contrast, even when a *reference* was supplied: that is
-        a different quantity rather than a better-corrected one, and it is
-        negative-going, which peak fits and intensity colour bars both misread.
-        Use :attr:`energy_contrast`, or ``spectra_source="contrast"`` in
-        :mod:`~tmdc_optics_tools.plotting`.
-        """
-        for rung in (self.energy_spectra_bg, self.energy_spectra_cr):
-            if rung is not None:
-                return rung
-        return self.energy_spectra
-
-    @property
-    def contrast_label(self) -> str:
-        """
-        Y-axis label for :attr:`contrast` / :attr:`energy_contrast`.
-
-        Independent of :attr:`signal_label`, because the contrast is a *derived*
-        quantity: a scan of ``spectra_type="R"`` keeps reporting "Reflected
-        intensity (counts)" for its raw spectra while its contrast is labelled
-        ΔR/R₀.
-        """
-        if self.contrast_mode == "ratio":
-            return r"$R/R_0$"
-        name, unit = SIGNAL_LABELS["RC"]
-        return f"{name} ({unit})" if unit else name
-
-    # --- Picking a window out of the spectral axis ----------------------------
-
-    def pixel_slice(self, x_range: tuple, *, x_axis: str = "energy") -> slice:
-        """
-        Positions of the spectrometer pixels lying inside a spectral window.
-
-        Gives back *where* the window is rather than the data inside it, so that
-        one slice cuts a spectrum and its axis together and the two cannot drift
-        apart — which is what a fit over part of a spectrum needs:
-
-        >>> px   = scan.pixel_slice((1.63, 1.72))            # doctest: +SKIP
-        >>> x, y = scan.energy[px], scan.get_spectrum_at(value=50)[px]
-
-        Parameters
-        ----------
-        x_range : tuple of (lo, hi)
-            The window, in the units of *x_axis* — eV for ``"energy"``, nm for
-            ``"wavelength"``.  Bounds are inclusive, and their order carries no
-            information: ``(1.72, 1.63)`` is the same window as ``(1.63, 1.72)``.
-        x_axis : {"energy", "wavelength"}
-            Which spectral axis *x_range* is given on.  It also fixes what the
-            result may index, since the two orderings are reversed with respect
-            to each other: :attr:`energy` and every ``energy_*`` array take an
-            ``"energy"`` slice, while :attr:`wavelength`, the ``spectra*`` rungs
-            and :attr:`contrast` take a ``"wavelength"`` one.  A slice from the
-            wrong axis returns a real but wrong window.
-
-        Returns
-        -------
-        slice
-            Indexes the pixel axis — axis 0 of the spectra arrays, and the whole
-            of :attr:`energy` / :attr:`wavelength`.  A slice rather than a mask,
-            so indexing with it gives a view rather than a copy.
-
-        Raises
-        ------
-        ValueError
-            If no pixel lies inside the window, the message giving the span of
-            the axis.  An empty window is refused here rather than being left to
-            surface as an empty spectrum inside a fit.
-        ValueError
-            If the axis is not monotonic, so that the window is not one
-            consecutive run of pixels and cannot be expressed as a slice.
-        TypeError
-            If *x_range* is not a pair of numbers.
-
-        Warns
-        -----
-        UserWarning
-            When a bound lies beyond the end of the axis by more than half a
-            pixel, so the window returned is narrower than the one asked for.
-
-        See Also
-        --------
-        nearest_index : the same idea on the sweep axis, one point rather than a
-            run of them.
-
-        Examples
-        --------
-        >>> scan.pixel_slice((1.63, 1.72))                     # doctest: +SKIP
-        slice(400, 730, None)
-        >>> scan.pixel_slice((720, 760), x_axis="wavelength")  # doctest: +SKIP
-        slice(210, 540, None)
-        """
-        _, unit = _x_axis_name_unit(x_axis, what="pixel_slice()")
-        values  = self.energy if x_axis == "energy" else self.wavelength
-        return processing._window_slice(values, x_range, axis=x_axis, unit=unit,
-                                       what="pixel_slice()", stacklevel=3)
-
-    # --- Picking spectra out of the sweep ------------------------------------
-
-    def get_spectrum_at(self, value: float = None, *,
-                        axis   : str   = "sweep",
-                        fast   : float = None,
-                        slow   : float = None,
-                        source : str   = "best",
-                        x_axis : str   = "energy") -> np.ndarray:
-        """
-        Spectra at the sweep coordinate closest to the value(s) given.
-
-        **The rank of the result depends on how much you specify.**  Pinning
-        every axis gives one spectrum, ``(n_pixels,)``; leaving one free gives
-        the line of spectra along it, ``(n_pixels, n)`` with the swept dimension
-        last, as everywhere else in the package.
-
-        Parameters
-        ----------
-        value : float, optional
-            Coordinate on the sweep axis.  For a flat sweep only; a nest is
-            addressed with *fast* and *slow*.
-        axis : str
-            Which quantity *value* is read against, spelled as ``sweep=`` spells
-            it: a registry key such as ``"top_voltage"`` or a raw row label such
-            as ``"V_A"``.  The default searches the declared sweep axis.  Use it
-            when a sweep is declared in one coordinate and you want a point in
-            another — a field sweep driven by both gates at a fixed ratio can be
-            addressed by ``axis="top_voltage"``.  Not combinable with *fast* or
-            *slow*: to address a nest by another quantity, declare the nest in
-            it.
-        fast, slow : float, optional
-            Coordinates on the nest axes.  Give both for a single spectrum, or
-            one to hold that axis and take every point of the other.
-        source : str
-            Which correction state to read: ``"best"`` (the most-corrected state
-            available), ``"raw"``, ``"cr"``, ``"bg"``, ``"contrast"``, or
-            ``"pre_jacobian"`` (energy axis only).
-        x_axis : {"energy", "wavelength"}
-            Which spectral ordering *source* is served on.  The returned spectra
-            run along :attr:`energy` or :attr:`wavelength` accordingly.
-
-        Returns
-        -------
-        np.ndarray
-            A **view** into the source array, never a copy, so the
-            never-mutate rule reaches it.  Strided rather than contiguous, as
-            any column selection out of a row-major array is; anything
-            downstream that demands contiguity will copy it.
-
-        Raises
-        ------
-        ValueError
-            If *value* is given for a nested sweep, or *fast*/*slow* for a flat
-            one, or if neither is given.  For the whole grid, use :meth:`as_grid`.
-        ValueError
-            If a coordinate names more than one sweep point, since returning one
-            of them would drop the rest without saying so.  Every quantity of a
-            nest repeats, so this is what an undeclared nest looks like from
-            here; the message says what to declare.  :meth:`nearest_index` warns
-            instead of raising, because a single index is all it can return.
-
-        Warns
-        -----
-        UserWarning
-            When a requested coordinate is further than half a step from any real
-            point — see :meth:`nearest_index`.
-
-        See Also
-        --------
-        get_spectrum_by_index : the same selection by integer position.
-        nearest_index : the index alone, for composing against another array.
-        as_grid : the whole sweep reshaped onto the nest.
-
-        Examples
-        --------
-        >>> scan.get_spectrum_at(2.5).shape                  # doctest: +SKIP
-        (1340,)
-        >>> scan.get_spectrum_at(15.0, axis="top_voltage").shape  # doctest: +SKIP
-        (1340,)
-        >>> scan.get_spectrum_at(fast=3.0, slow=1.0).shape   # doctest: +SKIP
-        (1340,)
-        >>> scan.get_spectrum_at(fast=3.0).shape             # doctest: +SKIP
-        (1340, 51)
-        """
-        selector = self._sweep_selector(
-            value, axis=axis, fast=fast, slow=slow, by_value=True,
-            what="get_spectrum_at()")
-        return _resolve_spectra(self, source, x_axis)[:, selector]
-
-    def get_spectrum_by_index(self, index: int = None, *,
-                              fast   : int = None,
-                              slow   : int = None,
-                              source : str = "best",
-                              x_axis : str = "energy") -> np.ndarray:
-        """
-        Spectra at integer sweep positions — :meth:`get_spectrum_at` by index.
-
-        Same arguments, same rank rules and same return contract, except that
-        the coordinates are positions rather than values, so nothing is searched
-        for and nothing is warned about.  Negative positions count from the end,
-        as elsewhere in Python.
-
-        Parameters
-        ----------
-        index : int, optional
-            Position on the sweep axis.  For a flat sweep only.
-        fast, slow : int, optional
-            Positions on the nest axes, ``0 <= i < n_fast`` / ``n_slow``.
-        source, x_axis
-            As :meth:`get_spectrum_at`.
-
-        Returns
-        -------
-        np.ndarray
-            ``(n_pixels,)`` with every axis pinned, else ``(n_pixels, n)``.
-            A view, as :meth:`get_spectrum_at`.
-
-        Raises
-        ------
-        IndexError
-            If a position is out of range for its axis.
-        """
-        selector = self._sweep_selector(
-            index, fast=fast, slow=slow, by_value=False,
-            what="get_spectrum_by_index()")
-        return _resolve_spectra(self, source, x_axis)[:, selector]
-
-    # --- Dunder methods ----------------------------------------------------
-
-    def _repr_axis_lines(self, w: int) -> list:
-        return [
-            f"  {'λ range':<{w}}: "
-            f"{self.wavelength.min():.1f} – {self.wavelength.max():.1f} nm",
-            f"  {'Energy range':<{w}}: "
-            f"{self.energy.min():.3f} – {self.energy.max():.3f} eV",
-        ]
-
     def _repr_extra_lines(self, w: int) -> list:
-        lines = [f"  {'ROI':<{w}}: ExpROI{self._roi}"]
+        # Which of the two CCD regions :attr:`spectra` points at is this
+        # instrument's own question, and it reads above the corrections.
+        return ([f"  {'ROI':<{w}}: ExpROI{self._roi}"]
+                + super()._repr_extra_lines(w))
         if self.cosmic_ray_mask is not None:
             n_flagged = int(self.cosmic_ray_mask.sum())
             lines.append(
