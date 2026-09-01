@@ -221,6 +221,11 @@ def test_it_is_a_drop_in_for_plotting_and_fitting(ez):
     fig, ax, mesh = plotting.plot_spectral_map(ez)
     # One mesh row per sweep point, per 0031.
     assert mesh.get_array().shape == (ez.n_sweeps, ez.n_pixels)
+
+    # Reachability only, and deliberately not the fitted values: this sample has
+    # four overlapping features, so a single-peak fit is the wrong model for it
+    # and six of these points converge to a Lorentzian tens of eV wide (A31).
+    # What is asserted is that the scan satisfies what fitting reads off it.
     fits = fitting.fit_scan_peak(ez, x_range=(1.60, 1.70))
     assert len(fits) == ez.n_sweeps
     import matplotlib.pyplot as plt
