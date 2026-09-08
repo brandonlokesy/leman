@@ -1296,6 +1296,53 @@ footprint, so `median_kernel > 1` on a block holding a guarded column widens tha
 by the kernel. Whether the median filter should skip non-finite pixels is its own
 question, in `processing`, not in the plotting call.
 
+**A31. `fit_scan_peak` can return a peak 18 eV wide, and nothing it reports says so.**
+— *open, reported 2026-08-31*
+On a window holding two overlapping features, the single-peak model has an escape that
+`curve_fit` reaches happily: amplitude and offset grow enormous and opposite, the
+Lorentzian flattens to a straight ramp across the window, and the residual falls. The
+`fit_lorentzian` docstring already names the mechanism — "a Lorentzian's `1/x**2` wings
+are partly degenerate with a flat offset over a finite window" — but nothing bounds it,
+because `fit_scan_peak` forwards neither `p0=` nor `bounds=` to the fitter it loops,
+though `fit_lorentzian` accepts both.
+
+Measured on `examples/data/big-table-spectral/PL_Ez_…csv` over `(1.60, 1.70)` eV, a
+monolayer WSe₂ field sweep with four resolvable features in `1.45–1.80` eV and its two
+strongest about 40 meV apart:
+
+| | |
+|---|---|
+| FWHM, median | 25.6 meV |
+| FWHM, max | **18 788 meV** (18.8 eV) |
+| points over 200 meV | 6 of 101 |
+| at sweep 34 | amplitude `+1.7497e9`, offset `−1.7493e9`, FWHM 15.8 eV |
+
+**Neither returned flag catches it, which is the part that matters.** `converged` is
+`True` on all 101 points — scipy did converge, into a corner of parameter space with no
+peak in it. And `r_squared` is no screen either: sweep 33 fits a 224 meV width at
+r² = 0.892 against a **median of 0.897**, so a quality cut that removes it removes half
+the good points too. The reliable tell is the near-cancellation of amplitude against
+offset, or simply a width no transition can have.
+
+*Not a wrong number in the arithmetic* — the fit is the least-squares optimum for that
+model on that window. The defect is that a caller has no way to say the model is wrong,
+and no returned value that tells them it was.
+
+*Fix sketch, in the order the options cost:* forward `p0=` and `bounds=` from
+`fit_scan_peak` to `fit_lorentzian`/`fit_gaussian`, so a width ceiling is expressible at
+all — this is the small one and it closes the escape. Beyond that, a per-sweep wrapper
+over `fit_pl_peaks`, which already fits several named peaks together with widths bounded
+to `0.002–0.15` eV; there is no such wrapper today, and its shipped `PL_PEAKS["WSe2"]`
+seeds do not match every sample (see `dev/physics-conventions.md` §9, which already
+records that those seeds have no traceable source). Whether `fit_scan_peak` should
+additionally *refuse* a fit whose amplitude and offset cancel is a design question, not
+part of the fix.
+
+*Found* while writing `examples/example-big-table.ipynb`, whose first draft plotted these
+widths on an axis labelled "FWHM (meV)". That panel was removed rather than repaired —
+the sample has several overlapping features and a single-peak fit is the wrong tool for
+it, which the notebook now says instead of demonstrating.
+
 
 ## B. Dead parameters — accepted, documented, silently ignored
 

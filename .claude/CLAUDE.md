@@ -325,6 +325,27 @@ keyword in the index there. Don't re-litigate, and don't "helpfully" restore.
   says which export layout a decoder accepts, nothing more. "Carries two ROIs" is
   `_HDF5_SIGNALS`; "has the correction ladder" is `isinstance(scan,
   _SpectralSweep)`.
+- Don't name a BigTable parameter row from the MATLAB snippet alone. Rows 10, 12,
+  13, 17 and 30 are `Row 10`…`Row 30` on purpose: that list maps row 9 to two
+  different quantities and calls row 13 a gate current in amperes at 19 mA. An
+  unnamed row is still readable and still a usable `sweep=` axis, so it costs
+  nothing; a wrong name reaches every axis label and every archive. Don't guess
+  that rows 12 and 13 are swapped either. And don't put a unit on the
+  gate-current rows — the blank one is a statement of ignorance. 0039.
+- Don't give `BigTableSpectralSweep` a `roi=`, and don't drop its fourth block
+  field silently. The two signal columns are identical in every file seen and what
+  the second is *for* is unknown, so one is read and a disagreement warns — that
+  disagreement is the evidence that would settle it. Don't promote the warning to
+  a refusal.
+- Don't downgrade the repeated-axis check to a warning, or replace it with a
+  column-count test. A real-space image's width divides by four often enough
+  (a 512-column frame is committed under `examples/data/exciton-diffusion/`), so
+  the count alone lets one through to be read as a 128-block sweep.
+- Don't make `BigTableSpectralSweep` write HDF5 by putting its one signal into
+  both region slots. It would round-trip and read back as an
+  `AttoCubeSpectralSweep`. The format needs a field recording which instrument
+  wrote the file first; until then both directions refuse, with one shared
+  message.
 
 ## Known issues — check before "helpfully" fixing
 
