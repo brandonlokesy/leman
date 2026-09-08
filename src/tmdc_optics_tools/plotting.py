@@ -2648,7 +2648,7 @@ class GridImageSequence:
     :class:`ImageSequencePanel`-compatible sequence.
 
     For a stack already reshaped or reordered outside any loader — e.g.
-    :meth:`~tmdc_optics_tools.loaders._AttoCubeSweep.as_image_grid` followed
+    :meth:`~tmdc_optics_tools.loaders._Sweep.as_image_grid` followed
     by :func:`~tmdc_optics_tools.processing.reorder_grid` — rather than one
     that still has a ``load_frame`` of its own to forward to, which is what
     :class:`TrimmedImageSequence` is for.
@@ -2677,7 +2677,7 @@ class GridSweep:
     :class:`NormalizedSpectrumPanel`-compatible scan.
 
     For per-frame arrays already reshaped or reordered — e.g. via
-    :meth:`~tmdc_optics_tools.loaders._AttoCubeSweep.as_grid` followed by
+    :meth:`~tmdc_optics_tools.loaders._Sweep.as_grid` followed by
     :func:`~tmdc_optics_tools.processing.reorder_grid` — since the original
     sweep object's own arrays are in the wrong order for that reordering to
     apply to directly.
@@ -3208,6 +3208,7 @@ def animate_wl_pl_spectra(
         AttoCubePLScanRealSpace,
         AttoCubeSpectralSweep,
         AttoCubeLaserReferenceImage,
+        _SpectralSweep,
     )
 
     # Resolve the shared laser reference (path -> loader, object -> as-is).
@@ -3227,9 +3228,12 @@ def animate_wl_pl_spectra(
         )
 
     def _spectrum_scan(spec):
-        # isinstance on the base class also accepts the deprecated
-        # AttoCubePLVabScan, which is a subclass of it.
-        if spec is None or isinstance(spec, AttoCubeSpectralSweep):
+        # Any sweep of spectra, from any instrument, and so also the
+        # deprecated AttoCubePLVabScan.  Tested against the shared base
+        # rather than one instrument's class, because the alternative —
+        # treating an unrecognised scan as a path and calling str() on it
+        # — fails somewhere far less obvious.
+        if spec is None or isinstance(spec, _SpectralSweep):
             return spec
         # A bare path: this function animates PL, so declare it rather than
         # letting the loader guess.  Pass a pre-built sweep for anything else.

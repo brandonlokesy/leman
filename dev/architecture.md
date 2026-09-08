@@ -199,14 +199,24 @@ A handful of rows are **analysis-primary**, so they get promoted to first-class
 properties with a unit conversion attached. That promotion is the **curated
 registry**.
 
-The class-level table `_AttoCubeSweep._CURATED` maps
+The class-level table `_CURATED` maps
 
 ```
 curated attribute  ->  (default row label, scale, unit)
 ```
 
+**The keys are shared; the rows belong to the instrument.** `_SWEEP_TYPES`,
+`_SWEEP_REQUIRES`, `_GATE_ROLE_CURATED` and `_ROLE_CURRENT_CURATED` all name
+those eight attributes, and the properties on `_Sweep` read them, so every
+instrument class must supply an entry for each. What it must not do is inherit
+another instrument's rows: a label, the scale that turns that row into a
+physical quantity, and the unit the scale lands in are three facts about one
+exporter. `_Sweep._CURATED` is therefore **empty**, and each instrument names
+its own table at module level. The AttoCube's is `_ATTOCUBE_CURATED`, pointed
+at by both AttoCube classes:
+
 ```python
-_CURATED = {
+_ATTOCUBE_CURATED = {
     "v_top":     ("V_A",              1.0,      "V"),
     "v_bot":     ("V_B",              1.0,      "V"),
     "power":     ("Excitation Power", 0.303e6,  "µW"),
@@ -225,11 +235,13 @@ A `None` label means the row is not a fixed property of the format but comes fro
 the session's `gates=` declaration. The two voltages carry a default anyway, because
 `_gate_candidates()` and `gate_mode` both describe an *undeclared* scan and need
 somewhere to look; the three currents have no such reader, so a default there would
-be a guess nothing consults. Their labels are filled in from `gates` through
-`_CHANNEL_SIBLING_CURRENT`, which records that a source-meter channel's bias row and
-current row are one terminal — `{"bottom": "V_A"}` therefore also makes `I_A`
-reachable as `i_bot`. A gate declared on some other row keeps its voltage and has no
-current.
+be a guess nothing consults. Their labels are filled in from `gates` through the
+class attribute `_SIBLING_CURRENT`, which records that a source-meter channel's bias
+row and current row are one terminal — on the AttoCube, `{"bottom": "V_A"}`
+therefore also makes `I_A` reachable as `i_bot`. A gate declared on some other row
+keeps its voltage and has no current. Which rows pair is per instrument for the same
+reason the table above is, so `_Sweep._SIBLING_CURRENT` is empty and
+`_ATTOCUBE_SIBLING_CURRENT` holds the AttoCube's two.
 
 Reading a curated entry is:
 
@@ -246,7 +258,7 @@ Four things to know:
   the returned array changes nothing.
 - **A curated row a file lacks is not an error.** The property raises only if you
   access it. A file from a different instrument configuration still loads.
-- **`self._CURATED` is the class default; `self._curated` is this instance's
+- **`self._CURATED` is the instrument's table; `self._curated` is this instance's
   resolved copy** — same keys, but labels, scales and units may all have been
   overridden. It is built as lists so it can be mutated during construction, then
   frozen to tuples so it cannot be after.
@@ -605,20 +617,41 @@ scan = AttoCubeSpectralSweep(
 
 ## The base class contract
 
-`_AttoCubeSweep` holds everything independent of *what the measured axis is*. A
-subclass declares four class attributes and then drives construction itself:
+There are **two** private bases, and which one a thing belongs on is decided by
+a single question:
+
+| Class | Holds what is independent of | Example members |
+|---|---|---|
+| `_Sweep` | *what the measured axis is* | `parameters`, the curated registry, `gates`, `sweep_axis`, the nest, `to_hdf5` |
+| `_SpectralSweep` | *which instrument wrote the file* | `energy`, the correction ladder, `pixel_slice`, `get_spectrum_at` |
+| a loader | nothing | its decoder, its `_CURATED`, its `__init__` |
+
+A subclass declares its class attributes and then drives construction itself:
 
 ```python
-_LAYOUT_KIND = "spectral"   # which export layout it accepts
+# on _SpectralSweep — true of any sweep of spectra
 _AXIS_ATTR   = "wavelength" # attribute holding the (n_points,) axis
 _SIGNAL_ATTR = "spectra"    # attribute holding the (n_points, n_sweeps) signal
 _POINT_NOUN  = "pixels"     # what to call n_points in __repr__
+
+# on the loader — true of one exporter
+_LAYOUT_KIND  = "spectral"  # which export layout it accepts
+_CURATED      = ...         # its rows
+_HDF5_SIGNALS = ...         # which arrays an archive of it carries
 ```
 
-`AttoCubeTRPLSweep` sets the same four to `"temporal"`, `"time"`, `"decays"`,
-`"time bins"`. Those four strings are the *entire* difference the base class sees —
-`n_sweeps` is `getattr(self, self._SIGNAL_ATTR).shape[1]`, and everything else
-follows.
+`AttoCubeTRPLSweep` is a sibling of `_SpectralSweep`, not a child: it sets the
+first three to `"time"`, `"decays"`, `"time bins"` on itself, and has no energy
+axis and no correction ladder. Those strings are the *entire* difference `_Sweep`
+sees — `n_sweeps` is `getattr(self, self._SIGNAL_ATTR).shape[1]`, and
+everything else follows.
+
+**`_SpectralSweep` deliberately has no `__init__`.** See the next paragraph: the
+order of construction is load-bearing, so each loader writes the sequence out.
+A second reason is mechanical — `AttoCubeSpectralSweep.__init__` carries no
+docstring of its own, so mkdocstrings renders its *signature* above the class
+docstring's parameter table; an inherited `__init__` would print a signature
+without `roi=` above a table that documents `roi`.
 
 Construction is spelled out in each subclass rather than hidden in a template method,
 **because the ordering is load-bearing and a reader should be able to see it.**
@@ -1048,7 +1081,8 @@ figure), so `_assemble` compares them with `time_rtol`, never for equality.
 
 It is a **separate class rather than a mode of `AttoCubeSpectralSweep`**, and has no
 `spectra` attribute — the signal is `decays`, the axis is `time`, and there are no
-ROIs. Everything it shares lives in `_AttoCubeSweep`.
+ROIs. Everything it shares lives in `_Sweep`, which is why it is a sibling of
+`_SpectralSweep` rather than a child of it.
 
 `_TRPL_TIME_UNIT` is the single place the ns/4-ps-bin assumption is written down. Any
 fitted lifetime inherits it, and it is consistent with the Picoharp rows and a
@@ -1402,7 +1436,8 @@ A change that breaks one of these is a bug even if the tests pass.
 | add a new sweep axis | write the property, add a `_SWEEP_TYPES` row (+ `_SWEEP_REQUIRES` if it needs a specific row) — usable as `sweep=`, `fast_sweep=` and `slow_sweep=` at once, since all three share `_resolve_sweep` |
 | reshape a raster, or pick a spectrum out of one | declare `fast_sweep=`/`slow_sweep=`, then `as_grid()` / `get_spectrum_at()`; §`sweep_grid()` above |
 | add a new input format | write a decoder returning the §2.1 payload; add a suffix to the dispatch in `_decode` |
-| add a curated parameter | one row in `_AttoCubeSweep._CURATED`, plus a property |
+| add a curated parameter | one row in **each** instrument's `_CURATED`, plus a property on `_Sweep` |
+| add a spectral loader for a new instrument | a decoder, a `_CURATED`, a `_SIBLING_CURRENT`, a `_validate_payload` and an `__init__`, on a subclass of `_SpectralSweep` |
 | add a curated-backed sweep axis | a `_SWEEP_TYPES` row whose unit is `None` — the unit comes from the registry entry, and a literal here would go stale under `curated_units` |
 | understand a gate refusal | the refusal matrix in §2.2 above |
 | know why a number is what it is | `dev/physics-conventions.md` |
@@ -1437,7 +1472,11 @@ skeleton of the whole design:
 | `_GATE_ROLES` | *(derived)* + `"channel"` | — |
 | `_BLOCK_LAYOUTS` | block field names → layout kind | a new export layout |
 | `_CLASS_FOR_KIND` | layout kind → class name | (for the "wrong class" error) |
-| `_CURATED` | curated attribute → (row label, scale, unit); the one home for that unit | a new promoted parameter |
+| `_CURATED` | curated attribute → (row label, scale, unit); the one home for that unit. **Empty on `_Sweep`** | a new promoted parameter, added to every instrument's table |
+| `_ATTOCUBE_CURATED` | the AttoCube's rows, shared by both AttoCube classes | a row the AttoCube writes that is worth promoting |
+| `_ATTOCUBE_SIBLING_CURRENT` | AttoCube voltage row → the current row at the same terminal | another source-meter channel on that system |
+| `_SIBLING_CURRENT` | *(class attribute)* the same, per instrument. Empty on `_Sweep` | a new instrument's channel pairs |
+| `_HDF5_SIGNALS` | *(class attribute)* (dataset name, attribute) pairs an archive must carry | a class whose signal is not one of the existing shapes |
 | `_COSMIC_RAY_KEYS` | *(derived from a signature)* | — |
 | `constants.SPECTROSCOPY_TYPES` | code → full name | a new measurement type |
 | `constants.SIGNAL_LABELS` | code → (axis name, unit) | its axis label |

@@ -4,7 +4,7 @@ Key-parity invariants between the two vocabulary tables in ``constants``.
 ``SPECTROSCOPY_TYPES`` and ``SIGNAL_LABELS`` are keyed identically but reach
 different code. The first gates ``spectra_type=`` at load time, supplies the
 option list in the resulting error messages, and is re-exported to the
-``reference`` subpackage; the second is read only by ``_AttoCubeSweep``'s label
+``reference`` subpackage; the second is read only by ``_Sweep``'s label
 properties and by ``contrast_label``. Nothing structural holds them in step, so
 adding a measurement type means editing two dicts.
 

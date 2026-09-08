@@ -32,7 +32,7 @@ plugins:
           options:
             docstring_style: numpy
             # Sweep classes keep their shared surface on a private base
-            # (_AttoCubeSweep), which mkdocstrings skips by default — without this
+            # (_Sweep), which mkdocstrings skips by default — without this
             # the rendered pages omit sweep_axis, v_top, ef, to_hdf5 and ~15 more.
             inherited_members: true
             show_source: true
