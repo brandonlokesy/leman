@@ -3241,6 +3241,45 @@ def extract_energy_shift(
 # Multi-peak tracking (simultaneous fit at each sweep point)
 # ---------------------------------------------------------------------------
 
+@dataclass
+class MultiPeakTrackResult:
+    """
+    Result of :func:`track_multi_peak_energies`.
+
+    Attributes
+    ----------
+    tracks : list of PeakTrack
+        One per species, in the same order as the input seeds.
+    fit_results : list of FitResult
+        One per sweep point.  Each contains the full multi-peak model
+        curve (``result.y_fit``) for visual confirmation.
+    energy : np.ndarray
+        The energy axis used for fitting (after any ``x_range``
+        windowing).
+    """
+    tracks      : list
+    fit_results : list
+    energy      : np.ndarray
+
+    def __repr__(self) -> str:
+        n_species = len(self.tracks)
+        n_sweeps  = len(self.fit_results)
+        n_conv    = sum(r.converged for r in self.fit_results)
+        return (
+            f"MultiPeakTrackResult ({n_species} species, "
+            f"{n_sweeps} sweep points, {n_conv} converged)"
+        )
+
+    def __iter__(self):
+        return iter(self.tracks)
+
+    def __len__(self):
+        return len(self.tracks)
+
+    def __getitem__(self, index):
+        return self.tracks[index]
+
+
 def track_multi_peak_energies(
     scan,
     seeds        : list  = None,
@@ -3250,7 +3289,7 @@ def track_multi_peak_energies(
     fwhm_seed    : float = 0.02,
     fwhm_range   : tuple = (0.002, 0.15),
     baseline     : str   = "constant",
-) -> list:
+) -> MultiPeakTrackResult:
     """
     Track multiple overlapping peaks simultaneously across a sweep.
 
@@ -3286,11 +3325,12 @@ def track_multi_peak_energies(
 
     Returns
     -------
-    list of PeakTrack
-        One per species, in the same order as the input *seeds*.
-        Each can be passed to :func:`extract_dipole_lengths`,
-        :func:`extract_amplitude_scaling`, or
-        :func:`extract_energy_shift`.
+    MultiPeakTrackResult
+        Contains ``.tracks`` (list of :class:`PeakTrack`, one per
+        species), ``.fit_results`` (list of :class:`FitResult`, one per
+        sweep point with the full model curve), and ``.energy`` (the
+        windowed energy axis).  Iterating over the result yields the
+        tracks.
 
     Raises
     ------
@@ -3349,6 +3389,7 @@ def track_multi_peak_energies(
     all_amps    = np.full((n_peaks, n_sweeps), np.nan)
     all_errors  = np.full((n_peaks, n_sweeps), np.nan)
     all_conv    = np.zeros((n_peaks, n_sweeps), dtype=bool)
+    all_fits    = []
 
     current_seeds = list(seeds)
 
@@ -3374,6 +3415,7 @@ def track_multi_peak_energies(
             bounds=(lo_list, hi_list),
             baseline=baseline,
         )
+        all_fits.append(result)
 
         if result.converged:
             for k in range(n_peaks):
@@ -3407,4 +3449,6 @@ def track_multi_peak_energies(
             method          = method_label,
         ))
 
-    return tracks
+    return MultiPeakTrackResult(
+        tracks=tracks, fit_results=all_fits, energy=energy,
+    )
