@@ -298,6 +298,48 @@ class SpectralSeriesPlot(NamedTuple):
     ax_twin : object
 
 
+class PeakTrackPlot(NamedTuple):
+    """
+    What :func:`plot_peak_track` drew.
+
+    A tuple, so ``fig, ax, scatter = plot_peak_track(...)`` unpacks, with
+    names for reaching one member without counting positions.
+
+    Attributes
+    ----------
+    fig     : matplotlib.figure.Figure
+    ax      : matplotlib.axes.Axes
+    scatter : matplotlib.collections.PathCollection
+        The scatter artist for the tracked peak energies.
+    """
+    fig     : object
+    ax      : object
+    scatter : object
+
+
+class MultiStarkPlot(NamedTuple):
+    """
+    What :func:`plot_multi_stark_shift` drew.
+
+    A tuple, so ``fig, ax, scatter, lines = plot_multi_stark_shift(...)``
+    unpacks, with names for reaching one member without counting positions.
+
+    Attributes
+    ----------
+    fig     : matplotlib.figure.Figure
+    ax      : matplotlib.axes.Axes
+    scatter : matplotlib.collections.PathCollection or None
+        The scatter of peak energies outside any segment range (greyed
+        out), ``None`` when every point belongs to a segment.
+    lines   : list of matplotlib.lines.Line2D
+        One per segment's linear fit, in segment order.
+    """
+    fig     : object
+    ax      : object
+    scatter : object
+    lines   : list
+
+
 # ---------------------------------------------------------------------------
 # Internal helper
 # ---------------------------------------------------------------------------
@@ -1984,6 +2026,247 @@ def plot_stark_shift(
     ax.set_ylabel("Peak energy (eV)")
     ax.legend(frameon=False, fontsize=7)
     return fig, ax
+
+
+def plot_peak_track(
+    track,
+    x_axis       : str   = "ef",
+    ax                    = None,
+    figsize      : tuple  = (5, 3.5),
+    dpi          : int    = None,
+    color        : str    = "C0",
+    marker       : str    = "o",
+    markersize   : float  = 3,
+    ef_ranges    : list   = None,
+    index_ranges : list   = None,
+    range_colors : list   = None,
+) -> PeakTrackPlot:
+    """
+    Plot the tracked peak energy across a field sweep.
+
+    Draws peak energy vs. electric field (or vs. sweep index).
+    Optionally highlights field ranges by colour to help choose
+    ranges for :func:`~tmdc_optics_tools.fitting.extract_dipole_lengths`.
+
+    Parameters
+    ----------
+    track : PeakTrack
+        Output of :func:`~tmdc_optics_tools.fitting.track_peak_energies`.
+    x_axis : {"ef", "energy", "index"}
+        ``"ef"`` (default) puts the electric field on x and peak energy
+        on y.  ``"energy"`` swaps them — peak energy on x, field on y.
+        ``"index"`` plots peak energy (y) against the sweep index (x).
+    ax : matplotlib.axes.Axes, optional
+    figsize, dpi : tuple, int
+    color : str
+        Base colour for points outside any highlighted range.
+    marker, markersize : str, float
+    ef_ranges : list of (lo, hi), optional
+        Field-value ranges to highlight.  Points within each range are
+        drawn in a distinct colour.
+    index_ranges : list of (start, stop), optional
+        Sweep-index ranges to highlight.
+    range_colors : list of str, optional
+        One colour per range.  Defaults to ``"C0"``, ``"C1"``, ….
+
+    Returns
+    -------
+    PeakTrackPlot
+        ``(fig, ax, scatter)``
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    else:
+        fig = ax.get_figure()
+
+    n = len(track.peak_energies)
+
+    flipped = x_axis == "energy"
+
+    if x_axis in ("ef", "energy"):
+        if track.ef is None:
+            raise ValueError(
+                "track.ef is None — supply a DeviceGeometry when loading "
+                "the scan, or use x_axis='index'."
+            )
+        x = track.ef
+    elif x_axis == "index":
+        x = np.arange(n)
+    else:
+        raise ValueError(
+            f"x_axis={x_axis!r} not recognised. Choose 'ef', 'energy', "
+            f"or 'index'."
+        )
+
+    y = track.peak_energies
+
+    def _xy(a, b):
+        return (b, a) if flipped else (a, b)
+
+    # Decide whether to colour-highlight ranges.
+    ranges = ef_ranges or index_ranges
+    if ranges is not None:
+        masks = fitting._resolve_dipole_ranges(
+            track.ef, ef_ranges, index_ranges, n,
+        )
+        if range_colors is None:
+            range_colors = [f"C{i}" for i in range(len(masks))]
+
+        # Points outside all ranges in the base colour.
+        any_mask = np.zeros(n, dtype=bool)
+        for m in masks:
+            any_mask |= m
+        outside = ~any_mask
+        scatter = ax.scatter(
+            *_xy(x[outside], y[outside]),
+            c=color, marker=marker, s=markersize**2, zorder=2,
+        )
+
+        # Each range in its own colour.
+        for m, c in zip(masks, range_colors):
+            ax.scatter(
+                *_xy(x[m], y[m]),
+                c=c, marker=marker, s=markersize**2, zorder=3,
+            )
+    else:
+        scatter = ax.scatter(
+            *_xy(x, y),
+            c=color, marker=marker, s=markersize**2,
+        )
+
+    if flipped:
+        ax.set_xlabel("Peak energy (eV)")
+        ax.set_ylabel(r"$E_F$ (mV/nm)")
+    elif x_axis == "ef":
+        ax.set_xlabel(r"$E_F$ (mV/nm)")
+        ax.set_ylabel("Peak energy (eV)")
+    else:
+        ax.set_xlabel("Sweep index")
+        ax.set_ylabel("Peak energy (eV)")
+    return PeakTrackPlot(fig=fig, ax=ax, scatter=scatter)
+
+
+def plot_multi_stark_shift(
+    result,
+    x_axis         : str   = "ef",
+    ax             = None,
+    figsize        : tuple = (5, 3.5),
+    dpi            : int   = None,
+    show_fit       : bool  = True,
+    show_errorbars : bool  = True,
+    colors         : list  = None,
+) -> MultiStarkPlot:
+    """
+    Plot the multi-range DC Stark shift with linear fits per segment.
+
+    Draws peak energy vs. electric field for every sweep point (greyed out
+    outside any range) and overlays each segment's linear fit with its
+    dipole length in the legend.
+
+    Parameters
+    ----------
+    result : MultiDipoleResult
+        Output of :func:`~tmdc_optics_tools.fitting.extract_dipole_lengths`.
+    x_axis : {"ef", "energy"}
+        ``"ef"`` (default) puts the electric field on the x-axis and peak
+        energy on y.  ``"energy"`` swaps them — energy on x, field on y —
+        matching the convention in e.g. Peimyoo et al., Nat. Photon. 2023
+        Fig. 1f.
+    ax : matplotlib.axes.Axes, optional
+    figsize, dpi : tuple, int
+    show_fit : bool
+        Overlay the per-segment linear fit lines.
+    show_errorbars : bool
+        Show per-point center uncertainties (only visible when errors
+        are finite, e.g. from a ``method="fit"`` track).
+    colors : list of str, optional
+        One colour per segment.  Defaults to ``"C0"``, ``"C1"``, ….
+
+    Returns
+    -------
+    MultiStarkPlot
+        ``(fig, ax, scatter, lines)``
+    """
+    if x_axis not in ("ef", "energy"):
+        raise ValueError(
+            f"x_axis={x_axis!r} not recognised. Choose 'ef' or 'energy'."
+        )
+    flipped = x_axis == "energy"
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    else:
+        fig = ax.get_figure()
+
+    track = result.track
+    ef    = track.ef
+    E     = track.peak_energies
+    n_seg = len(result.segments)
+
+    if colors is None:
+        colors = [f"C{i}" for i in range(n_seg)]
+
+    def _xy(a, b):
+        return (b, a) if flipped else (a, b)
+
+    # Which points belong to any segment.
+    any_mask = np.zeros(len(E), dtype=bool)
+    for seg in result.segments:
+        any_mask |= seg.converged_mask
+    outside = ~any_mask
+
+    # Grey points outside all segments.
+    scatter = None
+    if outside.any():
+        scatter = ax.scatter(
+            *_xy(ef[outside], E[outside]),
+            c="0.7", alpha=0.4, marker="o", s=9, zorder=1,
+        )
+
+    fit_lines = []
+    for i, seg in enumerate(result.segments):
+        m = seg.converged_mask
+        c = colors[i]
+
+        # Segment scatter.
+        errors = track.peak_errors[m]
+        has_errors = show_errorbars and np.any(np.isfinite(errors))
+        if has_errors:
+            err_kw = {"yerr": errors} if not flipped else {"xerr": errors}
+            ax.errorbar(
+                *_xy(ef[m], E[m]), **err_kw,
+                fmt="o", color=c, markersize=3,
+                linewidth=0.8, capsize=2,
+            )
+        else:
+            ax.scatter(*_xy(ef[m], E[m]), c=c, marker="o", s=9, zorder=2)
+
+        # Linear fit overlay.
+        if show_fit and np.isfinite(seg.slope):
+            ef_line = np.linspace(ef[m].min(), ef[m].max(), 300)
+            E_line  = seg.slope * ef_line + seg.intercept
+            label = (
+                f"$d_{{{i + 1}}}$ = "
+                f"{seg.dipole_length:.3f} ± "
+                f"{seg.dipole_length_err:.3f} nm"
+            )
+            line, = ax.plot(
+                *_xy(ef_line, E_line),
+                "-", color=c, linewidth=1.4, label=label,
+            )
+            fit_lines.append(line)
+        else:
+            fit_lines.append(None)
+
+    if flipped:
+        ax.set_xlabel("Peak energy (eV)")
+        ax.set_ylabel(r"$E_F$ (mV/nm)")
+    else:
+        ax.set_xlabel(r"$E_F$ (mV/nm)")
+        ax.set_ylabel("Peak energy (eV)")
+    if any(ln is not None for ln in fit_lines):
+        ax.legend(frameon=False, fontsize=7)
+    return MultiStarkPlot(fig=fig, ax=ax, scatter=scatter, lines=fit_lines)
 
 
 def plot_rise_time_vs_distance(
