@@ -3235,3 +3235,176 @@ def extract_energy_shift(
             if index_ranges is not None else None
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Multi-peak tracking (simultaneous fit at each sweep point)
+# ---------------------------------------------------------------------------
+
+def track_multi_peak_energies(
+    scan,
+    seeds        : list  = None,
+    peak_windows : list  = None,
+    x_range      : tuple = None,
+    center_tol   : float = 0.03,
+    fwhm_seed    : float = 0.02,
+    fwhm_range   : tuple = (0.002, 0.15),
+    baseline     : str   = "constant",
+) -> list:
+    """
+    Track multiple overlapping peaks simultaneously across a sweep.
+
+    Fits a sum of pseudo-Voigt peaks via :func:`fit_multi_voigt` at
+    each sweep point.  Seeds propagate forward: each sweep point uses
+    the previous point's fitted centers, so peaks that drift
+    continuously are tracked rather than lost.
+
+    Parameters
+    ----------
+    scan : AttoCubeSpectralSweep or BigTableSpectralSweep
+        Any sweep object with ``best_energy_spectra``, ``energy``, and
+        the sweep-axis properties.
+    seeds : list of float, optional
+        Approximate center energy of each species (eV).  Used as initial
+        guesses at the first sweep point and as fallbacks when a fit
+        fails.  Supply **one of** *seeds* or *peak_windows*, not both.
+    peak_windows : list of (lo, hi), optional
+        Energy ranges, one per species.  Converted to seeds (midpoint of
+        each window).
+    x_range : tuple of (E_min, E_max) in eV, optional
+        Spectral fitting window.  All peaks must lie within it.
+    center_tol : float
+        Maximum drift per sweep point (eV).  Each peak's center is
+        bounded within ``center_tol`` of the previous point's fitted
+        center (or the initial seed at point 0).
+    fwhm_seed : float
+        Initial FWHM guess for both Gaussian and Lorentzian components
+        (eV).
+    fwhm_range : tuple of (min, max)
+        FWHM bounds in eV.
+    baseline : {"none", "constant", "linear"}
+
+    Returns
+    -------
+    list of PeakTrack
+        One per species, in the same order as the input *seeds*.
+        Each can be passed to :func:`extract_dipole_lengths`,
+        :func:`extract_amplitude_scaling`, or
+        :func:`extract_energy_shift`.
+
+    Raises
+    ------
+    ValueError
+        If both or neither of *seeds* / *peak_windows* are supplied,
+        the scan lacks required attributes, or fewer than 2 peaks
+        are specified.
+    """
+    # --- Resolve seeds ---
+    if (seeds is None) == (peak_windows is None):
+        raise ValueError(
+            "Supply exactly one of seeds or peak_windows, not "
+            + ("both." if seeds is not None else "neither.")
+        )
+
+    if peak_windows is not None:
+        seeds = [0.5 * (lo + hi) for lo, hi in peak_windows]
+
+    seeds = [float(s) for s in seeds]
+    n_peaks = len(seeds)
+    if n_peaks < 2:
+        raise ValueError(
+            f"track_multi_peak_energies requires at least 2 peaks, "
+            f"got {n_peaks}. For a single peak, use track_peak_energies."
+        )
+
+    for attr in ("best_energy_spectra", "energy"):
+        if not hasattr(scan, attr):
+            raise ValueError(
+                f"scan has no {attr!r} attribute. Expected an "
+                f"AttoCubeSpectralSweep, BigTableSpectralSweep, or similar."
+            )
+
+    spectra = scan.best_energy_spectra
+    energy  = scan.energy
+
+    if x_range is not None:
+        lo_e, hi_e = sorted(x_range)
+        pixel_mask = (energy >= lo_e) & (energy <= hi_e)
+        if pixel_mask.sum() == 0:
+            raise ValueError(
+                f"x_range=({lo_e}, {hi_e}) selects no pixel on the energy "
+                f"axis (spans {float(energy.min()):.4f} to "
+                f"{float(energy.max()):.4f} eV)."
+            )
+        spectra = spectra[pixel_mask, :]
+        energy  = energy[pixel_mask]
+
+    n_sweeps   = spectra.shape[1]
+    fwhm_lo, fwhm_hi = fwhm_range
+    baseline_key = _resolve_baseline(baseline)[0]
+    method_label = _model_label("multi_voigt", baseline_key)
+
+    # Per-species accumulators.
+    all_centers = np.full((n_peaks, n_sweeps), np.nan)
+    all_amps    = np.full((n_peaks, n_sweeps), np.nan)
+    all_errors  = np.full((n_peaks, n_sweeps), np.nan)
+    all_conv    = np.zeros((n_peaks, n_sweeps), dtype=bool)
+
+    current_seeds = list(seeds)
+
+    for j in range(n_sweeps):
+        spectrum = spectra[:, j].astype(float)
+
+        # Build p0 and bounds from the current (propagated) seeds.
+        p0_list = []
+        lo_list = []
+        hi_list = []
+        for s in current_seeds:
+            nearest_idx = int(np.argmin(np.abs(energy - s)))
+            amp_guess = float(spectrum[nearest_idx])
+            if amp_guess <= 0:
+                amp_guess = float(np.nanmax(spectrum)) / n_peaks
+            p0_list.extend([amp_guess, s, fwhm_seed, fwhm_seed])
+            lo_list.extend([0.0,    s - center_tol, fwhm_lo, fwhm_lo])
+            hi_list.extend([np.inf, s + center_tol, fwhm_hi, fwhm_hi])
+
+        result = fit_multi_voigt(
+            energy, spectrum,
+            n_peaks=n_peaks, p0=p0_list,
+            bounds=(lo_list, hi_list),
+            baseline=baseline,
+        )
+
+        if result.converged:
+            for k in range(n_peaks):
+                all_centers[k, j] = result.params[f"center_{k}"]
+                all_amps[k, j]    = result.params[f"amp_{k}"]
+                all_errors[k, j]  = result.errors[f"center_{k}"]
+                all_conv[k, j]    = True
+            current_seeds = [
+                result.params[f"center_{k}"] for k in range(n_peaks)
+            ]
+        else:
+            warnings.warn(
+                f"Multi-peak fit did not converge at sweep point {j}.",
+                UserWarning, stacklevel=2,
+            )
+
+    sweep_values = scan.sweep_axis
+    sweep_label  = scan.sweep_label
+    sweep_unit   = scan.sweep_unit
+
+    tracks = []
+    for k in range(n_peaks):
+        tracks.append(PeakTrack(
+            sweep_values    = sweep_values,
+            sweep_label     = sweep_label,
+            sweep_unit      = sweep_unit,
+            peak_energies   = all_centers[k],
+            peak_amplitudes = all_amps[k],
+            peak_errors     = all_errors[k],
+            converged       = all_conv[k],
+            method          = method_label,
+        ))
+
+    return tracks

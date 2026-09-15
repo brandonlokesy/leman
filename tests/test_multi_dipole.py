@@ -20,6 +20,7 @@ from tmdc_optics_tools.fitting import (
     extract_amplitude_scaling,
     extract_dipole_lengths,
     extract_energy_shift,
+    track_multi_peak_energies,
     track_peak_energies,
 )
 
@@ -634,3 +635,111 @@ class TestExtractEnergyShift:
         )
         assert isinstance(result, EnergyShiftResult)
         assert len(result.segments) == 2
+
+
+# ---------------------------------------------------------------------------
+# track_multi_peak_energies
+# ---------------------------------------------------------------------------
+
+def _make_two_peak_scan(
+    n_pixels=300,
+    n_sweeps=30,
+    energy_range=(1.60, 1.80),
+    sweep_range=(0.0, 100.0),
+    center_a=1.72,
+    center_b=1.68,
+    drift_a=2e-4,
+    drift_b=-1e-4,
+    amp_a=80.0,
+    amp_b=50.0,
+    fwhm=0.01,
+):
+    """
+    Build a mock scan with two Lorentzian peaks that drift with the sweep.
+
+    Species A starts at center_a and shifts by drift_a per sweep unit.
+    Species B starts at center_b and shifts by drift_b per sweep unit.
+    """
+    energy = np.linspace(*energy_range, n_pixels)
+    sweep  = np.linspace(*sweep_range, n_sweeps)
+
+    centres_a = center_a + drift_a * sweep
+    centres_b = center_b + drift_b * sweep
+
+    spectra = np.empty((n_pixels, n_sweeps))
+    for k in range(n_sweeps):
+        spectra[:, k] = (
+            _lorentzian(energy, amp_a, centres_a[k], fwhm)
+            + _lorentzian(energy, amp_b, centres_b[k], fwhm)
+        )
+
+    scan = _MockScan(energy=energy, best_energy_spectra=spectra, ef=sweep)
+    return scan, centres_a, centres_b
+
+
+@pytest.fixture
+def two_peak_scan():
+    return _make_two_peak_scan()
+
+
+class TestTrackMultiPeakEnergies:
+
+    def test_recovers_two_species(self, two_peak_scan):
+        scan, centres_a, centres_b = two_peak_scan
+        tracks = track_multi_peak_energies(
+            scan, seeds=[1.72, 1.68], x_range=(1.60, 1.80),
+        )
+        assert len(tracks) == 2
+        assert tracks[0].peak_energies == pytest.approx(centres_a, abs=0.005)
+        assert tracks[1].peak_energies == pytest.approx(centres_b, abs=0.005)
+
+    def test_from_windows(self, two_peak_scan):
+        scan, centres_a, centres_b = two_peak_scan
+        tracks = track_multi_peak_energies(
+            scan, peak_windows=[(1.70, 1.74), (1.66, 1.70)],
+            x_range=(1.60, 1.80),
+        )
+        assert len(tracks) == 2
+        assert tracks[0].peak_energies == pytest.approx(centres_a, abs=0.005)
+        assert tracks[1].peak_energies == pytest.approx(centres_b, abs=0.005)
+
+    def test_both_seeds_and_windows_raises(self, two_peak_scan):
+        scan, _, _ = two_peak_scan
+        with pytest.raises(ValueError, match="exactly one"):
+            track_multi_peak_energies(
+                scan, seeds=[1.72, 1.68],
+                peak_windows=[(1.70, 1.74), (1.66, 1.70)],
+            )
+
+    def test_converged_on_clean_data(self, two_peak_scan):
+        scan, _, _ = two_peak_scan
+        tracks = track_multi_peak_energies(
+            scan, seeds=[1.72, 1.68], x_range=(1.60, 1.80),
+        )
+        for t in tracks:
+            assert t.converged.all()
+
+    def test_method_label(self, two_peak_scan):
+        scan, _, _ = two_peak_scan
+        tracks = track_multi_peak_energies(
+            scan, seeds=[1.72, 1.68], x_range=(1.60, 1.80),
+        )
+        for t in tracks:
+            assert "multi_voigt" in t.method
+
+    def test_tracks_work_with_extract_energy_shift(self, two_peak_scan):
+        scan, _, _ = two_peak_scan
+        tracks = track_multi_peak_energies(
+            scan, seeds=[1.72, 1.68], x_range=(1.60, 1.80),
+        )
+        for t in tracks:
+            result = extract_energy_shift(t, index_ranges=[(0, 29)])
+            assert len(result.segments) == 1
+            assert np.isfinite(result.segments[0].slope)
+
+    def test_single_peak_raises(self, two_peak_scan):
+        scan, _, _ = two_peak_scan
+        with pytest.raises(ValueError, match="at least 2"):
+            track_multi_peak_energies(
+                scan, seeds=[1.72], x_range=(1.60, 1.80),
+            )
