@@ -24,4 +24,4 @@ src/tmdc_optics_tools/reference/data/*.h5
 
 # Exclude files. Reflectance file too big.
 examples/data/reflectance-contrast/sample_26_07_24_17_55_47_iter_0.csv
-examples/data/reflectance-contrast/abs_26_07_24_17_55_47_iter_0.csv.csv
+examples/data/reflectance-contrast/abs_26_07_24_17_55_47_iter_0.csv
