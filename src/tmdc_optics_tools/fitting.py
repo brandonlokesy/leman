@@ -2222,49 +2222,62 @@ def extract_dipole_length(
 @dataclass
 class PeakTrack:
     """
-    Peak energy tracked across every sweep point of a field-dependent scan.
+    Peak energy and amplitude tracked across every sweep point.
 
     Produced by :func:`track_peak_energies`.  The tracked peaks can be
-    inspected and plotted on their own (peak energy vs. field or vs. sweep
-    index), or passed to :func:`extract_dipole_lengths` to fit dipole
+    inspected and plotted on their own (peak energy vs. any sweep
+    coordinate), or passed to :func:`extract_dipole_lengths` to fit dipole
     moments over user-defined field ranges.
 
     Attributes
     ----------
-    ef            : np.ndarray or None
-        Electric field at each sweep point (mV/nm), or ``None`` when no
-        :class:`~tmdc_optics_tools.loaders.DeviceGeometry` was supplied.
-    peak_energies : np.ndarray
+    sweep_values    : np.ndarray
+        Sweep coordinate at each sweep point, shape ``(n_sweeps,)``.
+        Contains whatever the scan's declared sweep axis is (electric
+        field, power, voltage, or ``arange`` for an index sweep).
+    sweep_label     : str
+        Display label for the sweep axis (e.g. ``r"$E_F$"``,
+        ``"Power"``, ``"Sweep index"``).
+    sweep_unit      : str
+        Unit string for the sweep axis (e.g. ``"mV/nm"``, ``"µW"``,
+        ``""``).
+    peak_energies   : np.ndarray
         Peak energy at each sweep point (eV).
-    peak_errors   : np.ndarray
+    peak_amplitudes : np.ndarray
+        Peak intensity at each sweep point (detector counts).
+        For ``method="argmax"`` this is the spectral maximum within the
+        detection window.
+    peak_errors     : np.ndarray
         1-sigma uncertainty on each peak energy (eV).
         All ``NaN`` when ``method="argmax"`` (no formal error bars).
-    converged     : np.ndarray of bool
+    converged       : np.ndarray of bool
         ``True`` for every sweep point where the peak was found.
         All ``True`` when ``method="argmax"``.
-    method        : str
+    method          : str
         Tracking method used: ``"argmax"``.
     """
-    ef            : np.ndarray
-    peak_energies : np.ndarray
-    peak_errors   : np.ndarray
-    converged     : np.ndarray
-    method        : str
+    sweep_values    : np.ndarray
+    sweep_label     : str
+    sweep_unit      : str
+    peak_energies   : np.ndarray
+    peak_amplitudes : np.ndarray
+    peak_errors     : np.ndarray
+    converged       : np.ndarray
+    method          : str
 
     def __repr__(self) -> str:
         n = len(self.peak_energies)
         lo = float(np.nanmin(self.peak_energies))
         hi = float(np.nanmax(self.peak_energies))
-        ef_str = (
-            f"available ({len(self.ef)} points)"
-            if self.ef is not None else "not available"
-        )
+        if self.sweep_unit:
+            sweep_str = f"{self.sweep_label} ({self.sweep_unit}), {n} points"
+        else:
+            sweep_str = f"{self.sweep_label}, {n} points"
         return (
             f"PeakTrack\n"
             f"  Method        : {self.method}\n"
-            f"  Sweep points  : {n}\n"
+            f"  Sweep axis    : {sweep_str}\n"
             f"  Peak range    : {lo:.4f} – {hi:.4f} eV\n"
-            f"  Field axis    : {ef_str}\n"
             f"  Converged     : {self.converged.sum()} / {n}"
         )
 
@@ -2278,14 +2291,17 @@ def track_peak_energies(
     Track the peak emission energy at every sweep point.
 
     Returns a :class:`PeakTrack` that can be plotted on its own
-    (to visualise peak shifts) or passed to :func:`extract_dipole_lengths`
-    for multi-range dipole extraction.
+    (to visualise peak shifts against the scan's sweep coordinate) or
+    passed to :func:`extract_dipole_lengths` for multi-range dipole
+    extraction.
 
     Parameters
     ----------
     scan : AttoCubeSpectralSweep or BigTableSpectralSweep
         Any sweep object with ``best_energy_spectra`` (shape
-        ``(n_pixels, n_sweeps)``) and ``energy`` (shape ``(n_pixels,)``).
+        ``(n_pixels, n_sweeps)``), ``energy`` (shape ``(n_pixels,)``),
+        and the sweep-axis properties ``sweep_axis``, ``sweep_label``,
+        ``sweep_unit``.
     method : {"argmax"}
         ``"argmax"``
             Energy of maximum intensity at each sweep point.
@@ -2343,92 +2359,104 @@ def track_peak_energies(
         energy  = energy[pixel_mask]
 
     # argmax along the pixel axis for each sweep column.
-    idx           = np.argmax(spectra, axis=0)
-    peak_energies = energy[idx]
-    peak_errors   = np.full_like(peak_energies, np.nan)
-    converged     = np.ones(len(peak_energies), dtype=bool)
+    idx             = np.argmax(spectra, axis=0)
+    peak_energies   = energy[idx]
+    peak_amplitudes = spectra[idx, np.arange(spectra.shape[1])]
+    peak_errors     = np.full_like(peak_energies, np.nan)
+    converged       = np.ones(len(peak_energies), dtype=bool)
 
-    ef = getattr(scan, "ef", None)
+    sweep_values = scan.sweep_axis
+    sweep_label  = scan.sweep_label
+    sweep_unit   = scan.sweep_unit
 
     return PeakTrack(
-        ef            = ef,
-        peak_energies = peak_energies,
-        peak_errors   = peak_errors,
-        converged     = converged,
-        method        = method,
+        sweep_values    = sweep_values,
+        sweep_label     = sweep_label,
+        sweep_unit      = sweep_unit,
+        peak_energies   = peak_energies,
+        peak_amplitudes = peak_amplitudes,
+        peak_errors     = peak_errors,
+        converged       = converged,
+        method          = method,
     )
 
 
-def _resolve_dipole_ranges(
-    ef           : np.ndarray,
-    ef_ranges    : list,
+def _resolve_sweep_ranges(
+    sweep_values : np.ndarray,
+    coord_ranges : list,
     index_ranges : list,
     n_sweeps     : int,
+    unit         : str = "",
+    param_name   : str = "coord_ranges",
 ) -> list:
     """
-    Build boolean masks for multi-range dipole extraction.
+    Build boolean masks for multi-range extraction.
 
-    Accepts either *ef_ranges* (field-value windows) or *index_ranges*
-    (sweep-index windows), validates each, and warns when ranges overlap.
+    Accepts either *coord_ranges* (sweep-coordinate windows) or
+    *index_ranges* (sweep-index windows), validates each, and warns when
+    ranges overlap.
 
     Parameters
     ----------
-    ef : np.ndarray
-        Electric field at each sweep point (mV/nm).  Required when
-        *ef_ranges* is supplied; ignored for *index_ranges*.
-    ef_ranges : list, optional
-        Field-value ranges in mV/nm, both endpoints inclusive.  Each
-        element is either a single ``(lo, hi)`` tuple or a list of
-        ``(lo, hi)`` tuples whose masks are OR'd together — use the
-        list form to exclude isolated bad points from a regime without
-        splitting it into separate segments.
+    sweep_values : np.ndarray
+        Sweep coordinate at each sweep point.  Required when
+        *coord_ranges* is supplied; ignored for *index_ranges*.
+    coord_ranges : list, optional
+        Coordinate-value ranges, both endpoints inclusive.  Each element
+        is either a single ``(lo, hi)`` tuple or a list of ``(lo, hi)``
+        tuples whose masks are OR'd together — use the list form to
+        exclude isolated bad points from a regime without splitting it
+        into separate segments.
     index_ranges : list, optional
         Sweep-index ranges, both endpoints inclusive.  Accepts single
         ``(start, stop)`` tuples or lists of tuples, same as
-        *ef_ranges*.
+        *coord_ranges*.
     n_sweeps : int
+    unit : str
+        Unit string for warning messages (e.g. ``"mV/nm"``).
+    param_name : str
+        The caller's external parameter name for the coordinate ranges,
+        used in error and warning messages (e.g. ``"ef_ranges"``).
 
     Returns
     -------
     list of np.ndarray
         One boolean mask per range, shape ``(n_sweeps,)``.
     """
-    if (ef_ranges is None) == (index_ranges is None):
+    if (coord_ranges is None) == (index_ranges is None):
         raise ValueError(
-            "Supply exactly one of ef_ranges or index_ranges, not "
-            + ("both." if ef_ranges is not None else "neither.")
+            f"Supply exactly one of {param_name} or index_ranges, not "
+            + ("both." if coord_ranges is not None else "neither.")
         )
 
+    unit_suffix = f" {unit}" if unit else ""
     masks = []
 
-    if ef_ranges is not None:
-        # Threshold for warning about boundary snap distance — same logic
-        # as _nearest in loaders.py, re-implemented to avoid a cross-module
-        # private import.
-        finite_ef = ef[np.isfinite(ef)]
-        if finite_ef.size > 1:
-            step   = float(np.median(np.abs(np.diff(np.sort(finite_ef)))))
-            travel = float(np.ptp(finite_ef))
+    if coord_ranges is not None:
+        sv = sweep_values
+        finite_sv = sv[np.isfinite(sv)]
+        if finite_sv.size > 1:
+            step   = float(np.median(np.abs(np.diff(np.sort(finite_sv)))))
+            travel = float(np.ptp(finite_sv))
         else:
             step   = 0.0
             travel = 0.0
         threshold = max(0.5 * step, 0.001 * travel)
 
-        for i, element in enumerate(ef_ranges):
-            # Compound range: a list of (lo, hi) tuples OR'd together.
+        for i, element in enumerate(coord_ranges):
             sub_ranges = (
                 element if isinstance(element, list) else [element]
             )
-            mask = np.zeros(len(ef), dtype=bool)
+            mask = np.zeros(len(sv), dtype=bool)
             for lo, hi in sub_ranges:
                 lo, hi = float(lo), float(hi)
                 if lo > hi:
                     lo, hi = hi, lo
-                sub_mask = (ef >= lo) & (ef <= hi)
+                sub_mask = (sv >= lo) & (sv <= hi)
 
                 if sub_mask.sum() == 0:
-                    below = ef[ef < lo]
-                    above = ef[ef > hi]
+                    below = sv[sv < lo]
+                    above = sv[sv > hi]
                     parts = []
                     if below.size:
                         parts.append(f"nearest below: {float(below.max()):.6g}")
@@ -2436,29 +2464,27 @@ def _resolve_dipole_ranges(
                         parts.append(f"nearest above: {float(above.min()):.6g}")
                     near_str = "; ".join(parts) if parts else "no finite values"
                     raise ValueError(
-                        f"ef_ranges[{i}] sub-range ({lo:.6g}, {hi:.6g}) "
+                        f"{param_name}[{i}] sub-range ({lo:.6g}, {hi:.6g}) "
                         f"selects no sweep point. {near_str}."
                     )
 
-                # Warn if the actual boundary differs from the requested one
-                # by more than half a typical sweep step.
-                ef_in = ef[sub_mask]
-                actual_lo = float(ef_in.min())
-                actual_hi = float(ef_in.max())
+                sv_in = sv[sub_mask]
+                actual_lo = float(sv_in.min())
+                actual_hi = float(sv_in.max())
                 if abs(actual_lo - lo) > threshold:
                     warnings.warn(
-                        f"ef_ranges[{i}] lower bound {lo:.6g} mV/nm: "
+                        f"{param_name}[{i}] lower bound {lo:.6g}{unit_suffix}: "
                         f"nearest sweep point inside the range is at "
-                        f"{actual_lo:.6g} mV/nm "
-                        f"({abs(actual_lo - lo):.4g} mV/nm away).",
+                        f"{actual_lo:.6g}{unit_suffix} "
+                        f"({abs(actual_lo - lo):.4g}{unit_suffix} away).",
                         UserWarning, stacklevel=3,
                     )
                 if abs(actual_hi - hi) > threshold:
                     warnings.warn(
-                        f"ef_ranges[{i}] upper bound {hi:.6g} mV/nm: "
+                        f"{param_name}[{i}] upper bound {hi:.6g}{unit_suffix}: "
                         f"nearest sweep point inside the range is at "
-                        f"{actual_hi:.6g} mV/nm "
-                        f"({abs(actual_hi - hi):.4g} mV/nm away).",
+                        f"{actual_hi:.6g}{unit_suffix} "
+                        f"({abs(actual_hi - hi):.4g}{unit_suffix} away).",
                         UserWarning, stacklevel=3,
                     )
                 mask |= sub_mask
@@ -2466,7 +2492,7 @@ def _resolve_dipole_ranges(
             n_in = int(mask.sum())
             if n_in < 2:
                 raise ValueError(
-                    f"ef_ranges[{i}] selects only {n_in} point(s); need "
+                    f"{param_name}[{i}] selects only {n_in} point(s); need "
                     f"at least 2 for a linear fit."
                 )
 
@@ -2621,9 +2647,9 @@ def extract_dipole_lengths(
     Raises
     ------
     ValueError
-        If *source* has no electric field, both or neither range
-        arguments are given, a range selects fewer than 2 points, or
-        *fit_method* is not recognised.
+        If the sweep is not electric field (unit ``"mV/nm"``), both or
+        neither range arguments are given, a range selects fewer than 2
+        points, or *fit_method* is not recognised.
 
     Examples
     --------
@@ -2656,21 +2682,25 @@ def extract_dipole_lengths(
             source, method=track_method, x_range=x_range,
         )
 
-    if track.ef is None:
+    if track.sweep_values is None or track.sweep_unit != "mV/nm":
         raise ValueError(
-            "track.ef is None — supply a DeviceGeometry when loading the "
-            "scan, or pass a PeakTrack with an ef array."
+            f"extract_dipole_lengths requires an electric-field sweep "
+            f"(unit 'mV/nm'), but the track's sweep is "
+            f"{track.sweep_label!r} ({track.sweep_unit!r}). "
+            f"Load the scan with sweep='electric_field'."
         )
 
     # --- Build per-range masks ---
-    masks = _resolve_dipole_ranges(
-        track.ef, ef_ranges, index_ranges, len(track.peak_energies),
+    masks = _resolve_sweep_ranges(
+        track.sweep_values, ef_ranges, index_ranges,
+        len(track.peak_energies),
+        unit=track.sweep_unit, param_name="ef_ranges",
     )
 
     # --- Fit each segment ---
     segments = []
     for i, mask in enumerate(masks):
-        ef_fit  = track.ef[mask]
+        ef_fit  = track.sweep_values[mask]
         E_fit   = track.peak_energies[mask]
         sig_fit = track.peak_errors[mask]
 
@@ -2705,7 +2735,7 @@ def extract_dipole_lengths(
             dipole_length = dipole_length_err = np.nan
 
         segments.append(DipoleResult(
-            ef                     = track.ef,
+            ef                     = track.sweep_values,
             peak_energies          = track.peak_energies,
             peak_errors            = track.peak_errors,
             slope                  = slope,

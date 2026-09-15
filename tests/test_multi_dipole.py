@@ -12,7 +12,7 @@ from tmdc_optics_tools.fitting import (
     PeakTrack,
     _dipole_bootstrap,
     _dipole_wls,
-    _resolve_dipole_ranges,
+    _resolve_sweep_ranges,
     extract_dipole_lengths,
     track_peak_energies,
 )
@@ -37,6 +37,20 @@ class _MockScan:
     @property
     def n_sweeps(self):
         return self.best_energy_spectra.shape[1]
+
+    @property
+    def sweep_axis(self):
+        if self.ef is not None:
+            return self.ef
+        return np.arange(self.n_sweeps, dtype=float)
+
+    @property
+    def sweep_label(self):
+        return r"$E_F$" if self.ef is not None else "Sweep index"
+
+    @property
+    def sweep_unit(self):
+        return "mV/nm" if self.ef is not None else ""
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +124,9 @@ class TestTrackPeakEnergies:
         assert track.peak_energies == pytest.approx(centres, abs=pixel_step)
         assert track.method == "argmax"
         assert track.converged.all()
-        assert track.ef is not None
+        assert track.sweep_values is not None
+        assert track.sweep_label == r"$E_F$"
+        assert track.sweep_unit == "mV/nm"
 
     def test_argmax_with_x_range(self, piecewise_scan):
         scan, centres = piecewise_scan
@@ -139,72 +155,107 @@ class TestTrackPeakEnergies:
         spectra = np.random.default_rng(0).random((50, 10))
         scan = _MockScan(energy=energy, best_energy_spectra=spectra, ef=None)
         track = track_peak_energies(scan)
-        assert track.ef is None
         assert len(track.peak_energies) == 10
+        assert len(track.sweep_values) == 10
+        assert track.sweep_unit == ""
 
     def test_missing_attribute_raises(self):
         with pytest.raises(ValueError, match="no .* attribute"):
             track_peak_energies("not a scan")
 
+    def test_peak_amplitudes_match_spectra(self, piecewise_scan):
+        scan, _ = piecewise_scan
+        track = track_peak_energies(scan)
+        spectra = scan.best_energy_spectra
+        idx = np.argmax(spectra, axis=0)
+        expected = spectra[idx, np.arange(spectra.shape[1])]
+        np.testing.assert_array_equal(track.peak_amplitudes, expected)
+
 
 # ---------------------------------------------------------------------------
-# _resolve_dipole_ranges
+# _resolve_sweep_ranges
 # ---------------------------------------------------------------------------
 
-class TestResolveDipoleRanges:
+class TestResolveSweepRanges:
 
-    def test_ef_ranges(self):
-        ef = np.linspace(-30, 30, 60)
-        masks = _resolve_dipole_ranges(ef, [(-30, -5), (5, 30)], None, 60)
+    def test_coord_ranges(self):
+        sv = np.linspace(-30, 30, 60)
+        masks = _resolve_sweep_ranges(
+            sv, coord_ranges=[(-30, -5), (5, 30)],
+            index_ranges=None, n_sweeps=60,
+        )
         assert len(masks) == 2
         assert all(m.dtype == bool for m in masks)
         for m in masks:
             assert m.sum() >= 2
 
     def test_index_ranges(self):
-        ef = np.linspace(-30, 30, 60)
-        masks = _resolve_dipole_ranges(ef, None, [(0, 20), (40, 59)], 60)
+        sv = np.linspace(-30, 30, 60)
+        masks = _resolve_sweep_ranges(
+            sv, coord_ranges=None,
+            index_ranges=[(0, 20), (40, 59)], n_sweeps=60,
+        )
         assert len(masks) == 2
         assert masks[0].sum() == 21
         assert masks[1].sum() == 20
 
     def test_empty_range_raises(self):
-        ef = np.linspace(-30, 30, 60)
+        sv = np.linspace(-30, 30, 60)
         with pytest.raises(ValueError, match="selects no sweep point"):
-            _resolve_dipole_ranges(ef, [(100, 200)], None, 60)
+            _resolve_sweep_ranges(
+                sv, coord_ranges=[(100, 200)],
+                index_ranges=None, n_sweeps=60,
+            )
 
     def test_too_few_points_raises(self):
-        ef = np.array([0.0, 10.0, 20.0])
+        sv = np.array([0.0, 10.0, 20.0])
         with pytest.raises(ValueError, match="only 1 point"):
-            _resolve_dipole_ranges(ef, [(9.5, 10.5)], None, 3)
+            _resolve_sweep_ranges(
+                sv, coord_ranges=[(9.5, 10.5)],
+                index_ranges=None, n_sweeps=3,
+            )
 
     def test_mutual_exclusion_both(self):
-        ef = np.linspace(-10, 10, 20)
+        sv = np.linspace(-10, 10, 20)
         with pytest.raises(ValueError, match="exactly one"):
-            _resolve_dipole_ranges(ef, [(-5, 5)], [(0, 10)], 20)
+            _resolve_sweep_ranges(
+                sv, coord_ranges=[(-5, 5)],
+                index_ranges=[(0, 10)], n_sweeps=20,
+            )
 
     def test_mutual_exclusion_neither(self):
-        ef = np.linspace(-10, 10, 20)
+        sv = np.linspace(-10, 10, 20)
         with pytest.raises(ValueError, match="exactly one"):
-            _resolve_dipole_ranges(ef, None, None, 20)
+            _resolve_sweep_ranges(
+                sv, coord_ranges=None,
+                index_ranges=None, n_sweeps=20,
+            )
 
     def test_overlap_warns(self):
-        ef = np.linspace(-30, 30, 60)
+        sv = np.linspace(-30, 30, 60)
         with pytest.warns(UserWarning, match="overlap"):
-            _resolve_dipole_ranges(ef, [(-10, 5), (0, 10)], None, 60)
+            _resolve_sweep_ranges(
+                sv, coord_ranges=[(-10, 5), (0, 10)],
+                index_ranges=None, n_sweeps=60,
+            )
 
     def test_boundary_snap_warns(self):
         # Steps of 10, travel 100.  Threshold = max(0.5 * 10, 0.001 * 100) = 5.
         # Asking for 50 as a lower bound when the nearest inside is 90 → 40 away.
-        ef = np.array([0.0, 10.0, 90.0, 100.0])
+        sv = np.array([0.0, 10.0, 90.0, 100.0])
         with pytest.warns(UserWarning, match="away"):
-            _resolve_dipole_ranges(ef, [(50.0, 100.0)], None, 4)
+            _resolve_sweep_ranges(
+                sv, coord_ranges=[(50.0, 100.0)],
+                index_ranges=None, n_sweeps=4,
+            )
 
     def test_compound_index_range(self):
-        ef = np.linspace(-30, 30, 60)
+        sv = np.linspace(-30, 30, 60)
         # Second element is a compound range: two sub-ranges OR'd together.
-        masks = _resolve_dipole_ranges(
-            ef, None, [(0, 10), [(20, 25), (30, 35)], (50, 59)], 60,
+        masks = _resolve_sweep_ranges(
+            sv, coord_ranges=None,
+            index_ranges=[(0, 10), [(20, 25), (30, 35)], (50, 59)],
+            n_sweeps=60,
         )
         assert len(masks) == 3
         assert masks[0].sum() == 11
@@ -213,19 +264,41 @@ class TestResolveDipoleRanges:
         assert not masks[1][26]
         assert masks[1][20] and masks[1][25] and masks[1][30] and masks[1][35]
 
-    def test_compound_ef_range(self):
-        ef = np.linspace(-30, 30, 61)  # step = 1 mV/nm
-        masks = _resolve_dipole_ranges(
-            ef, [(-30, -20), [(-10, -5), (5, 10)]], None, 61,
+    def test_compound_coord_range(self):
+        sv = np.linspace(-30, 30, 61)  # step = 1
+        masks = _resolve_sweep_ranges(
+            sv, coord_ranges=[(-30, -20), [(-10, -5), (5, 10)]],
+            index_ranges=None, n_sweeps=61,
         )
         assert len(masks) == 2
         # Compound: points at -10...-5 and 5...10, skipping -4...4.
-        assert not masks[1][30]  # ef=0 is excluded
+        assert not masks[1][30]  # sv=0 is excluded
 
     def test_index_out_of_bounds_raises(self):
-        ef = np.linspace(-10, 10, 20)
+        sv = np.linspace(-10, 10, 20)
         with pytest.raises(ValueError, match="out of bounds"):
-            _resolve_dipole_ranges(ef, None, [(0, 25)], 20)
+            _resolve_sweep_ranges(
+                sv, coord_ranges=None,
+                index_ranges=[(0, 25)], n_sweeps=20,
+            )
+
+    def test_unit_appears_in_snap_warning(self):
+        sv = np.array([0.0, 10.0, 90.0, 100.0])
+        with pytest.warns(UserWarning, match="mV/nm"):
+            _resolve_sweep_ranges(
+                sv, coord_ranges=[(50.0, 100.0)],
+                index_ranges=None, n_sweeps=4,
+                unit="mV/nm", param_name="ef_ranges",
+            )
+
+    def test_param_name_appears_in_error(self):
+        sv = np.linspace(-30, 30, 60)
+        with pytest.raises(ValueError, match="ef_ranges"):
+            _resolve_sweep_ranges(
+                sv, coord_ranges=[(100, 200)],
+                index_ranges=None, n_sweeps=60,
+                param_name="ef_ranges",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -303,18 +376,28 @@ class TestExtractDipoleLengths:
         assert result.index_ranges is not None
         assert result.ef_ranges is None
 
-    def test_no_ef_raises(self):
-        energy = np.linspace(1.4, 1.6, 50)
-        spectra = np.random.default_rng(0).random((50, 10))
-        scan = _MockScan(energy=energy, best_energy_spectra=spectra, ef=None)
-        with pytest.raises(ValueError, match="ef is None"):
-            extract_dipole_lengths(scan, ef_ranges=[(-5, 5)])
+    def test_non_ef_sweep_raises(self):
+        track = PeakTrack(
+            sweep_values=np.linspace(0, 100, 10),
+            sweep_label="Power",
+            sweep_unit="µW",
+            peak_energies=np.linspace(1.5, 1.6, 10),
+            peak_amplitudes=np.ones(10),
+            peak_errors=np.full(10, np.nan),
+            converged=np.ones(10, dtype=bool),
+            method="argmax",
+        )
+        with pytest.raises(ValueError, match="electric-field sweep"):
+            extract_dipole_lengths(track, ef_ranges=[(0, 50)])
 
     def test_partial_failure_warns(self):
         # NaN peak energies in the first segment cause curve_fit to fail.
         track = PeakTrack(
-            ef=np.array([1.0, 2.0, 5.0, 10.0, 15.0]),
+            sweep_values=np.array([1.0, 2.0, 5.0, 10.0, 15.0]),
+            sweep_label=r"$E_F$",
+            sweep_unit="mV/nm",
             peak_energies=np.array([np.nan, np.nan, 1.51, 1.52, 1.53]),
+            peak_amplitudes=np.array([np.nan, np.nan, 100.0, 110.0, 120.0]),
             peak_errors=np.full(5, np.nan),
             converged=np.ones(5, dtype=bool),
             method="argmax",
@@ -358,6 +441,7 @@ class TestRepr:
         assert "argmax" in r
         assert "60" in r  # sweep count
         assert "eV" in r
+        assert "mV/nm" in r
 
     def test_multi_dipole_result_repr(self, piecewise_scan):
         scan, _ = piecewise_scan

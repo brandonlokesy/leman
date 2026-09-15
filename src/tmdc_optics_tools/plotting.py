@@ -2030,40 +2030,41 @@ def plot_stark_shift(
 
 def plot_peak_track(
     track,
-    x_axis       : str   = "ef",
+    x_axis       : str   = "sweep",
     ax                    = None,
     figsize      : tuple  = (5, 3.5),
     dpi          : int    = None,
     color        : str    = "C0",
     marker       : str    = "o",
     markersize   : float  = 3,
-    ef_ranges    : list   = None,
+    coord_ranges : list   = None,
     index_ranges : list   = None,
     range_colors : list   = None,
 ) -> PeakTrackPlot:
     """
-    Plot the tracked peak energy across a field sweep.
+    Plot the tracked peak energy across a sweep.
 
-    Draws peak energy vs. electric field (or vs. sweep index).
-    Optionally highlights field ranges by colour to help choose
+    Draws peak energy vs. the sweep coordinate (or vs. sweep index).
+    Optionally highlights coordinate ranges by colour to help choose
     ranges for :func:`~tmdc_optics_tools.fitting.extract_dipole_lengths`.
 
     Parameters
     ----------
     track : PeakTrack
         Output of :func:`~tmdc_optics_tools.fitting.track_peak_energies`.
-    x_axis : {"ef", "energy", "index"}
-        ``"ef"`` (default) puts the electric field on x and peak energy
-        on y.  ``"energy"`` swaps them — peak energy on x, field on y.
-        ``"index"`` plots peak energy (y) against the sweep index (x).
+    x_axis : {"sweep", "energy", "index"}
+        ``"sweep"`` (default) puts the sweep coordinate on x and peak
+        energy on y.  ``"energy"`` swaps them — peak energy on x, sweep
+        coordinate on y.  ``"index"`` plots peak energy (y) against the
+        sweep index (x).
     ax : matplotlib.axes.Axes, optional
     figsize, dpi : tuple, int
     color : str
         Base colour for points outside any highlighted range.
     marker, markersize : str, float
-    ef_ranges : list of (lo, hi), optional
-        Field-value ranges to highlight.  Points within each range are
-        drawn in a distinct colour.
+    coord_ranges : list of (lo, hi), optional
+        Sweep-coordinate ranges to highlight.  Points within each range
+        are drawn in a distinct colour.
     index_ranges : list of (start, stop), optional
         Sweep-index ranges to highlight.
     range_colors : list of str, optional
@@ -2083,19 +2084,18 @@ def plot_peak_track(
 
     flipped = x_axis == "energy"
 
-    if x_axis in ("ef", "energy"):
-        if track.ef is None:
+    if x_axis in ("sweep", "energy"):
+        if track.sweep_values is None:
             raise ValueError(
-                "track.ef is None — supply a DeviceGeometry when loading "
-                "the scan, or use x_axis='index'."
+                "track.sweep_values is None — use x_axis='index'."
             )
-        x = track.ef
+        x = track.sweep_values
     elif x_axis == "index":
         x = np.arange(n)
     else:
         raise ValueError(
-            f"x_axis={x_axis!r} not recognised. Choose 'ef', 'energy', "
-            f"or 'index'."
+            f"x_axis={x_axis!r} not recognised. Choose 'sweep', "
+            f"'energy', or 'index'."
         )
 
     y = track.peak_energies
@@ -2104,10 +2104,11 @@ def plot_peak_track(
         return (b, a) if flipped else (a, b)
 
     # Decide whether to colour-highlight ranges.
-    ranges = ef_ranges or index_ranges
+    ranges = coord_ranges or index_ranges
     if ranges is not None:
-        masks = fitting._resolve_dipole_ranges(
-            track.ef, ef_ranges, index_ranges, n,
+        masks = fitting._resolve_sweep_ranges(
+            track.sweep_values, coord_ranges, index_ranges, n,
+            unit=track.sweep_unit, param_name="coord_ranges",
         )
         if range_colors is None:
             range_colors = [f"C{i}" for i in range(len(masks))]
@@ -2134,11 +2135,15 @@ def plot_peak_track(
             c=color, marker=marker, s=markersize**2,
         )
 
+    sweep_axis_label = (
+        f"{track.sweep_label} ({track.sweep_unit})"
+        if track.sweep_unit else track.sweep_label
+    )
     if flipped:
         ax.set_xlabel("Peak energy (eV)")
-        ax.set_ylabel(r"$E_F$ (mV/nm)")
-    elif x_axis == "ef":
-        ax.set_xlabel(r"$E_F$ (mV/nm)")
+        ax.set_ylabel(sweep_axis_label)
+    elif x_axis == "sweep":
+        ax.set_xlabel(sweep_axis_label)
         ax.set_ylabel("Peak energy (eV)")
     else:
         ax.set_xlabel("Sweep index")
@@ -2148,7 +2153,7 @@ def plot_peak_track(
 
 def plot_multi_stark_shift(
     result,
-    x_axis         : str   = "ef",
+    x_axis         : str   = "sweep",
     ax             = None,
     figsize        : tuple = (5, 3.5),
     dpi            : int   = None,
@@ -2159,19 +2164,19 @@ def plot_multi_stark_shift(
     """
     Plot the multi-range DC Stark shift with linear fits per segment.
 
-    Draws peak energy vs. electric field for every sweep point (greyed out
-    outside any range) and overlays each segment's linear fit with its
-    dipole length in the legend.
+    Draws peak energy vs. the sweep coordinate for every sweep point
+    (greyed out outside any range) and overlays each segment's linear
+    fit with its dipole length in the legend.
 
     Parameters
     ----------
     result : MultiDipoleResult
         Output of :func:`~tmdc_optics_tools.fitting.extract_dipole_lengths`.
-    x_axis : {"ef", "energy"}
-        ``"ef"`` (default) puts the electric field on the x-axis and peak
-        energy on y.  ``"energy"`` swaps them — energy on x, field on y —
-        matching the convention in e.g. Peimyoo et al., Nat. Photon. 2023
-        Fig. 1f.
+    x_axis : {"sweep", "energy"}
+        ``"sweep"`` (default) puts the sweep coordinate on the x-axis
+        and peak energy on y.  ``"energy"`` swaps them — energy on x,
+        sweep coordinate on y — matching the convention in e.g.
+        Peimyoo et al., Nat. Photon. 2023 Fig. 1f.
     ax : matplotlib.axes.Axes, optional
     figsize, dpi : tuple, int
     show_fit : bool
@@ -2187,9 +2192,9 @@ def plot_multi_stark_shift(
     MultiStarkPlot
         ``(fig, ax, scatter, lines)``
     """
-    if x_axis not in ("ef", "energy"):
+    if x_axis not in ("sweep", "energy"):
         raise ValueError(
-            f"x_axis={x_axis!r} not recognised. Choose 'ef' or 'energy'."
+            f"x_axis={x_axis!r} not recognised. Choose 'sweep' or 'energy'."
         )
     flipped = x_axis == "energy"
 
@@ -2199,7 +2204,7 @@ def plot_multi_stark_shift(
         fig = ax.get_figure()
 
     track = result.track
-    ef    = track.ef
+    sv    = track.sweep_values
     E     = track.peak_energies
     n_seg = len(result.segments)
 
@@ -2219,7 +2224,7 @@ def plot_multi_stark_shift(
     scatter = None
     if outside.any():
         scatter = ax.scatter(
-            *_xy(ef[outside], E[outside]),
+            *_xy(sv[outside], E[outside]),
             c="0.7", alpha=0.4, marker="o", s=9, zorder=1,
         )
 
@@ -2234,35 +2239,39 @@ def plot_multi_stark_shift(
         if has_errors:
             err_kw = {"yerr": errors} if not flipped else {"xerr": errors}
             ax.errorbar(
-                *_xy(ef[m], E[m]), **err_kw,
+                *_xy(sv[m], E[m]), **err_kw,
                 fmt="o", color=c, markersize=3,
                 linewidth=0.8, capsize=2,
             )
         else:
-            ax.scatter(*_xy(ef[m], E[m]), c=c, marker="o", s=9, zorder=2)
+            ax.scatter(*_xy(sv[m], E[m]), c=c, marker="o", s=9, zorder=2)
 
         # Linear fit overlay.
         if show_fit and np.isfinite(seg.slope):
-            ef_line = np.linspace(ef[m].min(), ef[m].max(), 300)
-            E_line  = seg.slope * ef_line + seg.intercept
+            sv_line = np.linspace(sv[m].min(), sv[m].max(), 300)
+            E_line  = seg.slope * sv_line + seg.intercept
             label = (
                 f"$d_{{{i + 1}}}$ = "
                 f"{seg.dipole_length:.3f} ± "
                 f"{seg.dipole_length_err:.3f} nm"
             )
             line, = ax.plot(
-                *_xy(ef_line, E_line),
+                *_xy(sv_line, E_line),
                 "-", color=c, linewidth=1.4, label=label,
             )
             fit_lines.append(line)
         else:
             fit_lines.append(None)
 
+    sweep_axis_label = (
+        f"{track.sweep_label} ({track.sweep_unit})"
+        if track.sweep_unit else track.sweep_label
+    )
     if flipped:
         ax.set_xlabel("Peak energy (eV)")
-        ax.set_ylabel(r"$E_F$ (mV/nm)")
+        ax.set_ylabel(sweep_axis_label)
     else:
-        ax.set_xlabel(r"$E_F$ (mV/nm)")
+        ax.set_xlabel(sweep_axis_label)
         ax.set_ylabel("Peak energy (eV)")
     if any(ln is not None for ln in fit_lines):
         ax.legend(frameon=False, fontsize=7)
