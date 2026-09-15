@@ -7,13 +7,19 @@ import numpy as np
 import pytest
 
 from tmdc_optics_tools.fitting import (
+    AmplitudeScalingResult,
+    AmplitudeScalingSegment,
     DipoleResult,
+    EnergyShiftResult,
+    EnergyShiftSegment,
     MultiDipoleResult,
     PeakTrack,
     _dipole_bootstrap,
     _dipole_wls,
     _resolve_sweep_ranges,
+    extract_amplitude_scaling,
     extract_dipole_lengths,
+    extract_energy_shift,
     track_peak_energies,
 )
 
@@ -496,3 +502,135 @@ class TestRepr:
         r = repr(result)
         assert "2 segments" in r
         assert "nm" in r
+
+
+# ---------------------------------------------------------------------------
+# extract_amplitude_scaling
+# ---------------------------------------------------------------------------
+
+class TestExtractAmplitudeScaling:
+
+    def test_recovers_known_exponent(self):
+        alpha = 1.5
+        sweep = np.array([1.0, 2.0, 4.0, 8.0, 16.0, 32.0])
+        amplitudes = 50.0 * sweep ** alpha
+
+        track = PeakTrack(
+            sweep_values=sweep,
+            sweep_label="Power",
+            sweep_unit="µW",
+            peak_energies=np.full(6, 1.5),
+            peak_amplitudes=amplitudes,
+            peak_errors=np.full(6, np.nan),
+            converged=np.ones(6, dtype=bool),
+            method="argmax",
+        )
+        result = extract_amplitude_scaling(
+            track, index_ranges=[(0, 5)],
+        )
+        assert isinstance(result, AmplitudeScalingResult)
+        assert len(result.segments) == 1
+        assert result.segments[0].exponent == pytest.approx(alpha, abs=0.01)
+        assert result.segments[0].r_squared > 0.999
+
+    def test_multiple_ranges_different_exponents(self):
+        sweep = np.arange(1.0, 21.0)
+        # First 10 points: exponent 1.0, last 10: exponent 2.0.
+        amp = np.empty(20)
+        amp[:10] = 10.0 * sweep[:10] ** 1.0
+        amp[10:] = 10.0 * sweep[10:] ** 2.0
+
+        track = PeakTrack(
+            sweep_values=sweep,
+            sweep_label="Power",
+            sweep_unit="µW",
+            peak_energies=np.full(20, 1.5),
+            peak_amplitudes=amp,
+            peak_errors=np.full(20, np.nan),
+            converged=np.ones(20, dtype=bool),
+            method="argmax",
+        )
+        result = extract_amplitude_scaling(
+            track, index_ranges=[(0, 9), (10, 19)],
+        )
+        assert len(result.segments) == 2
+        assert result.segments[0].exponent == pytest.approx(1.0, abs=0.05)
+        assert result.segments[1].exponent == pytest.approx(2.0, abs=0.05)
+
+    def test_from_scan(self, piecewise_scan):
+        scan, _ = piecewise_scan
+        result = extract_amplitude_scaling(
+            scan, index_ranges=[(0, 29), (30, 59)],
+        )
+        assert isinstance(result, AmplitudeScalingResult)
+        assert result.track is not None
+        assert len(result.segments) == 2
+
+    def test_zero_amplitude_warns(self):
+        sweep = np.arange(1.0, 11.0)
+        amp = sweep ** 1.5
+        amp[0] = 0.0  # one non-positive value
+
+        track = PeakTrack(
+            sweep_values=sweep,
+            sweep_label="Power",
+            sweep_unit="µW",
+            peak_energies=np.full(10, 1.5),
+            peak_amplitudes=amp,
+            peak_errors=np.full(10, np.nan),
+            converged=np.ones(10, dtype=bool),
+            method="argmax",
+        )
+        with pytest.warns(UserWarning, match="non-positive amplitude"):
+            result = extract_amplitude_scaling(
+                track, index_ranges=[(0, 9)],
+            )
+        assert isinstance(result, AmplitudeScalingResult)
+
+
+# ---------------------------------------------------------------------------
+# extract_energy_shift
+# ---------------------------------------------------------------------------
+
+class TestExtractEnergyShift:
+
+    def test_recovers_known_slope(self):
+        slope = 2.5e-4
+        sweep = np.linspace(0, 100, 50)
+        energies = slope * sweep + 1.50
+
+        track = PeakTrack(
+            sweep_values=sweep,
+            sweep_label="Power",
+            sweep_unit="µW",
+            peak_energies=energies,
+            peak_amplitudes=np.full(50, 100.0),
+            peak_errors=np.full(50, np.nan),
+            converged=np.ones(50, dtype=bool),
+            method="argmax",
+        )
+        result = extract_energy_shift(
+            track, index_ranges=[(0, 49)],
+        )
+        assert isinstance(result, EnergyShiftResult)
+        assert len(result.segments) == 1
+        assert result.segments[0].slope == pytest.approx(slope, rel=1e-6)
+        assert result.segments[0].r_squared > 0.9999
+
+    def test_matches_dipole_raw_slope(self, piecewise_scan):
+        scan, _ = piecewise_scan
+        ranges = [(0, 24), (25, 34), (35, 59)]
+
+        dipole = extract_dipole_lengths(scan, index_ranges=ranges)
+        shift  = extract_energy_shift(scan, index_ranges=ranges)
+
+        for d_seg, s_seg in zip(dipole.segments, shift.segments):
+            assert s_seg.slope == pytest.approx(d_seg.slope, rel=1e-10)
+
+    def test_from_scan(self, piecewise_scan):
+        scan, _ = piecewise_scan
+        result = extract_energy_shift(
+            scan, index_ranges=[(0, 29), (30, 59)],
+        )
+        assert isinstance(result, EnergyShiftResult)
+        assert len(result.segments) == 2

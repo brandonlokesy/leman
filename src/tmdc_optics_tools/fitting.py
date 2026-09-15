@@ -2871,3 +2871,367 @@ def extract_dipole_lengths(
         ef_ranges    = [tuple(r) for r in ef_ranges] if ef_ranges is not None else None,
         index_ranges = [tuple(r) for r in index_ranges] if index_ranges is not None else None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Amplitude scaling extraction (log-log fit)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AmplitudeScalingSegment:
+    """
+    Result of a log-log linear fit of peak amplitude vs. sweep coordinate
+    within one range.
+
+    Attributes
+    ----------
+    exponent      : float
+        Slope on the log-log plot (dimensionless).
+        On a power sweep this is the power-law order
+        (e.g. ~1 for excitons, ~2 for biexcitons).
+    exponent_err  : float
+        1-sigma uncertainty on the exponent.
+    intercept     : float
+        Intercept in log space: ``log(amplitude) = exponent * log(sweep) + intercept``.
+    intercept_err : float
+        1-sigma uncertainty on the log-space intercept.
+    r_squared     : float
+        R² of the log-log linear fit.
+    mask          : np.ndarray of bool
+        Boolean mask selecting the sweep points in this range.
+    """
+    exponent      : float
+    exponent_err  : float
+    intercept     : float
+    intercept_err : float
+    r_squared     : float
+    mask          : np.ndarray
+
+    def __repr__(self) -> str:
+        return (
+            f"AmplitudeScalingSegment(exponent={self.exponent:.4f} "
+            f"± {self.exponent_err:.4f}, R²={self.r_squared:.4f})"
+        )
+
+
+@dataclass
+class AmplitudeScalingResult:
+    """
+    Result of multi-range amplitude scaling extraction.
+
+    Attributes
+    ----------
+    track    : PeakTrack
+        The peak track used for extraction.
+    segments : list of AmplitudeScalingSegment
+        One per range.
+    coord_ranges  : list or None
+        The coordinate ranges passed by the caller, or ``None``.
+    index_ranges  : list or None
+        The index ranges passed by the caller, or ``None``.
+    """
+    track        : PeakTrack
+    segments     : list
+    coord_ranges : list
+    index_ranges : list
+
+    def __repr__(self) -> str:
+        n = len(self.segments)
+        lines = [
+            f"AmplitudeScalingResult ({n} segment{'s' if n != 1 else ''}, "
+            f"track method: {self.track.method})"
+        ]
+        for i, seg in enumerate(self.segments):
+            if self.coord_ranges is not None:
+                lo, hi = self.coord_ranges[i]
+                tag = f"{lo} – {hi}"
+            else:
+                lo, hi = self.index_ranges[i]
+                tag = f"idx: {lo}–{hi}"
+
+            if np.isfinite(seg.exponent):
+                lines.append(
+                    f"  Segment {i} : α = {seg.exponent:.4f} ± "
+                    f"{seg.exponent_err:.4f}  "
+                    f"R² = {seg.r_squared:.4f}  [{tag}]"
+                )
+            else:
+                lines.append(f"  Segment {i} : fit failed  [{tag}]")
+        return "\n".join(lines)
+
+
+def extract_amplitude_scaling(
+    source,
+    coord_ranges : list  = None,
+    index_ranges : list  = None,
+    x_range      : tuple = None,
+    track_method : str   = "argmax",
+    fit_method   : str   = "wls",
+    n_bootstrap  : int   = 2000,
+    rng          = None,
+) -> AmplitudeScalingResult:
+    """
+    Extract the amplitude scaling exponent from a log-log fit.
+
+    Fits ``log(peak_amplitude) = α · log(sweep_coordinate) + c`` within
+    each user-defined range.  On a power sweep the exponent *α* is the
+    power-law order (~1 for excitons, ~2 for biexcitons).
+
+    Parameters
+    ----------
+    source : scan or PeakTrack
+        A sweep object or an already-computed :class:`PeakTrack`.
+    coord_ranges : list of (lo, hi), optional
+        Sweep-coordinate ranges, both endpoints inclusive.
+    index_ranges : list of (start, stop), optional
+        Sweep-index ranges, both endpoints inclusive.
+    x_range : tuple of (E_min, E_max) in eV, optional
+        Energy window for peak detection, forwarded to
+        :func:`track_peak_energies` when *source* is a scan.
+    track_method : {"argmax", "fit"}
+        Peak-tracking method, forwarded to :func:`track_peak_energies`.
+    fit_method : {"wls", "minmax", "bootstrap"}
+        Linear-fit method for the log-log regression.
+    n_bootstrap : int
+        Bootstrap iterations (only for ``fit_method="bootstrap"``).
+    rng : np.random.Generator, optional
+
+    Returns
+    -------
+    AmplitudeScalingResult
+    """
+    if isinstance(source, PeakTrack):
+        track = source
+    else:
+        track = track_peak_energies(
+            source, method=track_method, x_range=x_range,
+        )
+
+    amplitudes = track.peak_amplitudes.copy().astype(float)
+    bad = amplitudes <= 0
+    if bad.any():
+        warnings.warn(
+            f"{int(bad.sum())} sweep point(s) have non-positive amplitude "
+            f"and will be excluded from the log-log fit.",
+            UserWarning, stacklevel=2,
+        )
+        amplitudes[bad] = np.nan
+
+    sweep = track.sweep_values.astype(float).copy()
+    bad_sweep = sweep <= 0
+    if bad_sweep.any():
+        warnings.warn(
+            f"{int(bad_sweep.sum())} sweep point(s) have non-positive "
+            f"coordinate and will be excluded from the log-log fit.",
+            UserWarning, stacklevel=2,
+        )
+        sweep[bad_sweep] = np.nan
+
+    log_sweep = np.log(sweep)
+    log_amp   = np.log(amplitudes)
+
+    # No formal amplitude errors on PeakTrack — pass all-NaN so the
+    # fitters fall back to unweighted.
+    y_errors = np.full_like(log_amp, np.nan)
+
+    fits = _extract_linear_fits(
+        x_values=log_sweep,
+        y_values=log_amp,
+        y_errors=y_errors,
+        coord_ranges=coord_ranges,
+        index_ranges=index_ranges,
+        n_sweeps=len(track.peak_energies),
+        fit_method=fit_method,
+        n_bootstrap=n_bootstrap,
+        rng=rng,
+        unit=track.sweep_unit,
+        param_name="coord_ranges",
+    )
+
+    segments = [
+        AmplitudeScalingSegment(
+            exponent=seg.slope, exponent_err=seg.slope_err,
+            intercept=seg.intercept, intercept_err=seg.intercept_err,
+            r_squared=seg.r_squared, mask=seg.mask,
+        )
+        for seg in fits
+    ]
+
+    return AmplitudeScalingResult(
+        track=track, segments=segments,
+        coord_ranges=(
+            [tuple(r) for r in coord_ranges]
+            if coord_ranges is not None else None
+        ),
+        index_ranges=(
+            [tuple(r) for r in index_ranges]
+            if index_ranges is not None else None
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Energy shift extraction (linear fit)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class EnergyShiftSegment:
+    """
+    Result of a linear fit of peak energy vs. sweep coordinate within
+    one range.
+
+    Attributes
+    ----------
+    slope         : float
+        Shift rate dE/d(sweep) in eV per sweep unit.
+    slope_err     : float
+        1-sigma uncertainty on the slope.
+    intercept     : float
+        Energy at zero sweep coordinate (eV).
+    intercept_err : float
+        1-sigma uncertainty on the intercept.
+    r_squared     : float
+        R² of the linear fit.
+    mask          : np.ndarray of bool
+        Boolean mask selecting the sweep points in this range.
+    """
+    slope         : float
+    slope_err     : float
+    intercept     : float
+    intercept_err : float
+    r_squared     : float
+    mask          : np.ndarray
+
+    def __repr__(self) -> str:
+        return (
+            f"EnergyShiftSegment(slope={self.slope:.4e} "
+            f"± {self.slope_err:.2e}, R²={self.r_squared:.4f})"
+        )
+
+
+@dataclass
+class EnergyShiftResult:
+    """
+    Result of multi-range energy shift extraction.
+
+    Attributes
+    ----------
+    track    : PeakTrack
+        The peak track used for extraction.
+    segments : list of EnergyShiftSegment
+        One per range.
+    coord_ranges  : list or None
+        The coordinate ranges passed by the caller, or ``None``.
+    index_ranges  : list or None
+        The index ranges passed by the caller, or ``None``.
+    """
+    track        : PeakTrack
+    segments     : list
+    coord_ranges : list
+    index_ranges : list
+
+    def __repr__(self) -> str:
+        n = len(self.segments)
+        lines = [
+            f"EnergyShiftResult ({n} segment{'s' if n != 1 else ''}, "
+            f"track method: {self.track.method})"
+        ]
+        for i, seg in enumerate(self.segments):
+            if self.coord_ranges is not None:
+                lo, hi = self.coord_ranges[i]
+                tag = f"{lo} – {hi}"
+            else:
+                lo, hi = self.index_ranges[i]
+                tag = f"idx: {lo}–{hi}"
+
+            if np.isfinite(seg.slope):
+                lines.append(
+                    f"  Segment {i} : dE/d(sweep) = {seg.slope:.4e} ± "
+                    f"{seg.slope_err:.2e}  "
+                    f"R² = {seg.r_squared:.4f}  [{tag}]"
+                )
+            else:
+                lines.append(f"  Segment {i} : fit failed  [{tag}]")
+        return "\n".join(lines)
+
+
+def extract_energy_shift(
+    source,
+    coord_ranges : list  = None,
+    index_ranges : list  = None,
+    x_range      : tuple = None,
+    track_method : str   = "argmax",
+    fit_method   : str   = "wls",
+    n_bootstrap  : int   = 2000,
+    rng          = None,
+) -> EnergyShiftResult:
+    """
+    Extract the peak energy shift rate from a linear fit.
+
+    Fits ``peak_energy = slope · sweep_coordinate + intercept`` within
+    each user-defined range.  The slope is in eV per sweep unit.
+
+    Parameters
+    ----------
+    source : scan or PeakTrack
+        A sweep object or an already-computed :class:`PeakTrack`.
+    coord_ranges : list of (lo, hi), optional
+        Sweep-coordinate ranges, both endpoints inclusive.
+    index_ranges : list of (start, stop), optional
+        Sweep-index ranges, both endpoints inclusive.
+    x_range : tuple of (E_min, E_max) in eV, optional
+        Energy window for peak detection, forwarded to
+        :func:`track_peak_energies` when *source* is a scan.
+    track_method : {"argmax", "fit"}
+        Peak-tracking method, forwarded to :func:`track_peak_energies`.
+    fit_method : {"wls", "minmax", "bootstrap"}
+        Linear-fit method.
+    n_bootstrap : int
+        Bootstrap iterations (only for ``fit_method="bootstrap"``).
+    rng : np.random.Generator, optional
+
+    Returns
+    -------
+    EnergyShiftResult
+    """
+    if isinstance(source, PeakTrack):
+        track = source
+    else:
+        track = track_peak_energies(
+            source, method=track_method, x_range=x_range,
+        )
+
+    fits = _extract_linear_fits(
+        x_values=track.sweep_values,
+        y_values=track.peak_energies,
+        y_errors=track.peak_errors,
+        coord_ranges=coord_ranges,
+        index_ranges=index_ranges,
+        n_sweeps=len(track.peak_energies),
+        fit_method=fit_method,
+        n_bootstrap=n_bootstrap,
+        rng=rng,
+        unit=track.sweep_unit,
+        param_name="coord_ranges",
+    )
+
+    segments = [
+        EnergyShiftSegment(
+            slope=seg.slope, slope_err=seg.slope_err,
+            intercept=seg.intercept, intercept_err=seg.intercept_err,
+            r_squared=seg.r_squared, mask=seg.mask,
+        )
+        for seg in fits
+    ]
+
+    return EnergyShiftResult(
+        track=track, segments=segments,
+        coord_ranges=(
+            [tuple(r) for r in coord_ranges]
+            if coord_ranges is not None else None
+        ),
+        index_ranges=(
+            [tuple(r) for r in index_ranges]
+            if index_ranges is not None else None
+        ),
+    )
