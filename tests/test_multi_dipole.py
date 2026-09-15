@@ -145,10 +145,55 @@ class TestTrackPeakEnergies:
         with pytest.raises(ValueError, match="not recognised"):
             track_peak_energies(scan, method="magic")
 
-    def test_fit_method_not_implemented(self, piecewise_scan):
+    def test_fit_recovers_peaks(self, piecewise_scan):
+        scan, centres = piecewise_scan
+        track = track_peak_energies(scan, method="fit", x_range=(1.45, 1.55))
+
+        assert isinstance(track, PeakTrack)
+        assert len(track.peak_energies) == scan.n_sweeps
+        # Lineshape fit is not quantised to the pixel grid, so tolerance
+        # is tighter than the argmax test.
+        pixel_step = float(np.median(np.diff(scan.energy)))
+        assert track.peak_energies == pytest.approx(
+            centres, abs=pixel_step / 2,
+        )
+
+    def test_fit_has_finite_errors(self, piecewise_scan):
         scan, _ = piecewise_scan
-        with pytest.raises(NotImplementedError, match="not yet implemented"):
-            track_peak_energies(scan, method="fit")
+        track = track_peak_energies(scan, method="fit", x_range=(1.45, 1.55))
+
+        # Most errors should be finite and positive.  A few may be inf
+        # when the peak sits near the edge of the fitting window and
+        # curve_fit cannot estimate the covariance.
+        finite = np.isfinite(track.peak_errors)
+        assert finite.sum() > 0.9 * len(track.peak_errors)
+        assert np.all(track.peak_errors[finite] > 0)
+
+    def test_fit_converged_all_true(self, piecewise_scan):
+        scan, _ = piecewise_scan
+        track = track_peak_energies(scan, method="fit", x_range=(1.45, 1.55))
+
+        assert track.converged.all()
+
+    def test_fit_method_stores_model_label(self, piecewise_scan):
+        scan, _ = piecewise_scan
+        track = track_peak_energies(scan, method="fit", x_range=(1.45, 1.55))
+        assert track.method == "lorentzian+constant"
+
+        track_g = track_peak_energies(
+            scan, method="fit", x_range=(1.45, 1.55), model="gaussian",
+        )
+        assert track_g.method == "gaussian+constant"
+
+    def test_fit_amplitudes_are_finite(self, piecewise_scan):
+        scan, _ = piecewise_scan
+        track = track_peak_energies(scan, method="fit", x_range=(1.45, 1.55))
+
+        assert np.all(np.isfinite(track.peak_amplitudes))
+        # The piecewise scan uses amplitude=100.0.
+        assert track.peak_amplitudes == pytest.approx(
+            np.full(scan.n_sweeps, 100.0), rel=0.1,
+        )
 
     def test_scan_without_ef(self):
         energy = np.linspace(1.4, 1.6, 50)

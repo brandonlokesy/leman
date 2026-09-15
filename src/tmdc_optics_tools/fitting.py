@@ -2284,8 +2284,10 @@ class PeakTrack:
 
 def track_peak_energies(
     scan,
-    method  : str   = "argmax",
-    x_range : tuple = None,
+    method   : str   = "argmax",
+    x_range  : tuple = None,
+    model    : str   = "lorentzian",
+    baseline : str   = "constant",
 ) -> PeakTrack:
     """
     Track the peak emission energy at every sweep point.
@@ -2302,14 +2304,22 @@ def track_peak_energies(
         ``(n_pixels, n_sweeps)``), ``energy`` (shape ``(n_pixels,)``),
         and the sweep-axis properties ``sweep_axis``, ``sweep_label``,
         ``sweep_unit``.
-    method : {"argmax"}
+    method : {"argmax", "fit"}
         ``"argmax"``
             Energy of maximum intensity at each sweep point.
             Simple and robust when the peak shifts over a wide range
             (e.g. hybridised bilayer systems).  No per-point error bars.
+        ``"fit"``
+            Single-peak lineshape fit at each sweep point via
+            :func:`fit_scan_peak`.  Gives per-point error bars on the
+            center energy and a fitted amplitude.
     x_range : tuple of (E_min, E_max) in eV, optional
         Restrict the energy window used for peak detection.
         Useful to avoid locking onto a laser line or substrate feature.
+    model : {"lorentzian", "gaussian"}
+        Lineshape model for ``method="fit"``.  Ignored for ``"argmax"``.
+    baseline : {"none", "constant", "linear"}
+        Baseline model for ``method="fit"``.  Ignored for ``"argmax"``.
 
     Returns
     -------
@@ -2320,16 +2330,8 @@ def track_peak_energies(
     ValueError
         If *method* is not recognised, the scan lacks the required
         attributes, or *x_range* selects no pixel.
-    NotImplementedError
-        If ``method="fit"`` (reserved for a future sliding-window
-        lineshape tracker).
     """
-    _METHODS = ("argmax",)
-    if method == "fit":
-        raise NotImplementedError(
-            "method='fit' (sliding-window lineshape tracking) is not yet "
-            "implemented. Use method='argmax'."
-        )
+    _METHODS = ("argmax", "fit")
     if method not in _METHODS:
         raise ValueError(
             f"method={method!r} is not recognised. Choose from {_METHODS}."
@@ -2342,7 +2344,36 @@ def track_peak_energies(
                 f"AttoCubeSpectralSweep, BigTableSpectralSweep, or similar."
             )
 
-    # (n_pixels, n_sweeps) — each column is one spectrum.
+    sweep_values = scan.sweep_axis
+    sweep_label  = scan.sweep_label
+    sweep_unit   = scan.sweep_unit
+
+    if method == "fit":
+        results = _fit_scan_peak(
+            scan, x_axis="energy", x_range=x_range,
+            model=model, sweep_mask=None, baseline=baseline,
+            stacklevel=4,
+        )
+        peak_energies   = np.array([r.params["center"] for r in results])
+        peak_amplitudes = np.array([r.params["amplitude"] for r in results])
+        peak_errors     = np.array([r.errors["center"] for r in results])
+        converged       = np.array([r.converged for r in results])
+        method_label    = _model_label(
+            model, _resolve_baseline(baseline)[0],
+        )
+
+        return PeakTrack(
+            sweep_values    = sweep_values,
+            sweep_label     = sweep_label,
+            sweep_unit      = sweep_unit,
+            peak_energies   = peak_energies,
+            peak_amplitudes = peak_amplitudes,
+            peak_errors     = peak_errors,
+            converged       = converged,
+            method          = method_label,
+        )
+
+    # --- argmax ---
     spectra = scan.best_energy_spectra
     energy  = scan.energy
 
@@ -2358,16 +2389,11 @@ def track_peak_energies(
         spectra = spectra[pixel_mask, :]
         energy  = energy[pixel_mask]
 
-    # argmax along the pixel axis for each sweep column.
     idx             = np.argmax(spectra, axis=0)
     peak_energies   = energy[idx]
     peak_amplitudes = spectra[idx, np.arange(spectra.shape[1])]
     peak_errors     = np.full_like(peak_energies, np.nan)
     converged       = np.ones(len(peak_energies), dtype=bool)
-
-    sweep_values = scan.sweep_axis
-    sweep_label  = scan.sweep_label
-    sweep_unit   = scan.sweep_unit
 
     return PeakTrack(
         sweep_values    = sweep_values,
