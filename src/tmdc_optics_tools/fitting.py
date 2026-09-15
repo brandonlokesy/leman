@@ -2538,6 +2538,116 @@ def _resolve_sweep_ranges(
 
 
 @dataclass
+class _LinearSegment:
+    """Raw per-range linear fit result (private, converted by public wrappers)."""
+    slope         : float
+    slope_err     : float
+    intercept     : float
+    intercept_err : float
+    r_squared     : float
+    mask          : np.ndarray
+
+
+def _extract_linear_fits(
+    x_values     : np.ndarray,
+    y_values     : np.ndarray,
+    y_errors     : np.ndarray,
+    coord_ranges,
+    index_ranges,
+    n_sweeps     : int,
+    fit_method   : str = "wls",
+    n_bootstrap  : int = 2000,
+    rng          = None,
+    unit         : str = "",
+    param_name   : str = "coord_ranges",
+    stacklevel   : int = 3,
+) -> list:
+    """
+    Fit a line within each coordinate or index range.
+
+    This is the mechanical core shared by every public extraction
+    function.  It resolves range masks, dispatches to the linear
+    fitters, and returns raw slopes — the physics interpretation
+    (dipole length, power-law exponent, shift rate) belongs to the
+    caller.
+
+    Parameters
+    ----------
+    x_values : np.ndarray
+        Independent variable at each sweep point (field, power, etc.).
+    y_values : np.ndarray
+        Dependent variable at each sweep point (energy, log-amplitude, etc.).
+    y_errors : np.ndarray
+        1-sigma on *y_values* (may be all NaN).
+    coord_ranges, index_ranges : list or None
+        Passed to :func:`_resolve_sweep_ranges`.
+    n_sweeps : int
+    fit_method : {"wls", "minmax", "bootstrap"}
+    n_bootstrap : int
+    rng : np.random.Generator, optional
+    unit : str
+        Unit for warning messages.
+    param_name : str
+        External parameter name for error messages.
+    stacklevel : int
+        Extra stack depth for warnings (callers add one per wrapper).
+
+    Returns
+    -------
+    list of _LinearSegment
+    """
+    _FIT_METHODS = ("wls", "minmax", "bootstrap")
+    if fit_method not in _FIT_METHODS:
+        raise ValueError(
+            f"fit_method={fit_method!r} is not recognised. "
+            f"Choose from {_FIT_METHODS}."
+        )
+
+    masks = _resolve_sweep_ranges(
+        x_values, coord_ranges, index_ranges, n_sweeps,
+        unit=unit, param_name=param_name,
+    )
+
+    segments = []
+    for i, mask in enumerate(masks):
+        x_fit   = x_values[mask]
+        y_fit   = y_values[mask]
+        sig_fit = y_errors[mask]
+
+        try:
+            if fit_method == "wls":
+                slope, slope_err, intercept, intercept_err = _dipole_wls(
+                    x_fit, y_fit, sig_fit,
+                )
+            elif fit_method == "minmax":
+                slope, slope_err, intercept, intercept_err = _dipole_minmax(
+                    x_fit, y_fit, sig_fit,
+                )
+            else:  # bootstrap
+                slope, slope_err, intercept, intercept_err = _dipole_bootstrap(
+                    x_fit, y_fit, sig_fit,
+                    n_bootstrap=n_bootstrap, rng=rng,
+                )
+
+            r_squared = _r_squared(y_fit, slope * x_fit + intercept)
+        except Exception as exc:
+            warnings.warn(
+                f"Linear fit failed for range {i}: {exc}",
+                UserWarning, stacklevel=stacklevel,
+            )
+            slope = slope_err = intercept = intercept_err = np.nan
+            r_squared = np.nan
+
+        segments.append(_LinearSegment(
+            slope=slope, slope_err=slope_err,
+            intercept=intercept, intercept_err=intercept_err,
+            r_squared=r_squared, mask=mask,
+        ))
+
+    return segments
+
+
+@dataclass
 class MultiDipoleResult:
     """
     Result of a multi-range dipole extraction.
@@ -2667,13 +2777,6 @@ def extract_dipole_lengths(
     ...     x_range=(1.43, 1.57),
     ... )
     """
-    _FIT_METHODS = ("wls", "minmax", "bootstrap")
-    if fit_method not in _FIT_METHODS:
-        raise ValueError(
-            f"fit_method={fit_method!r} is not recognised. "
-            f"Choose from {_FIT_METHODS}."
-        )
-
     # --- Resolve or build the peak track ---
     if isinstance(source, PeakTrack):
         track = source
@@ -2690,66 +2793,50 @@ def extract_dipole_lengths(
             f"Load the scan with sweep='electric_field'."
         )
 
-    # --- Build per-range masks ---
-    masks = _resolve_sweep_ranges(
-        track.sweep_values, ef_ranges, index_ranges,
-        len(track.peak_energies),
-        unit=track.sweep_unit, param_name="ef_ranges",
+    # --- Linear fits per range ---
+    fits = _extract_linear_fits(
+        x_values=track.sweep_values,
+        y_values=track.peak_energies,
+        y_errors=track.peak_errors,
+        coord_ranges=ef_ranges,
+        index_ranges=index_ranges,
+        n_sweeps=len(track.peak_energies),
+        fit_method=fit_method,
+        n_bootstrap=n_bootstrap,
+        rng=rng,
+        unit=track.sweep_unit,
+        param_name="ef_ranges",
     )
 
-    # --- Fit each segment ---
+    # --- Convert raw slopes to dipole lengths ---
     segments = []
-    for i, mask in enumerate(masks):
-        ef_fit  = track.sweep_values[mask]
-        E_fit   = track.peak_energies[mask]
-        sig_fit = track.peak_errors[mask]
-
-        try:
-            if fit_method == "wls":
-                slope, slope_err, intercept, intercept_err = _dipole_wls(
-                    ef_fit, E_fit, sig_fit,
-                )
-            elif fit_method == "minmax":
-                slope, slope_err, intercept, intercept_err = _dipole_minmax(
-                    ef_fit, E_fit, sig_fit,
-                )
-            else:  # bootstrap
-                slope, slope_err, intercept, intercept_err = _dipole_bootstrap(
-                    ef_fit, E_fit, sig_fit,
-                    n_bootstrap=n_bootstrap, rng=rng,
-                )
-
-            r_squared         = _r_squared(E_fit, slope * ef_fit + intercept)
-            dipole_length     = abs(slope) * 1000.0
-            dipole_length_err = (
-                abs(slope_err) * 1000.0 if np.isfinite(slope_err)
-                else np.nan
-            )
-        except Exception as exc:
-            warnings.warn(
-                f"Linear fit failed for range {i}: {exc}",
-                UserWarning, stacklevel=2,
-            )
-            slope = slope_err = intercept = intercept_err = np.nan
-            r_squared = np.nan
-            dipole_length = dipole_length_err = np.nan
-
+    for seg in fits:
+        dipole_length = abs(seg.slope) * 1000.0
+        dipole_length_err = (
+            abs(seg.slope_err) * 1000.0 if np.isfinite(seg.slope_err)
+            else np.nan
+        )
         segments.append(DipoleResult(
             ef                     = track.sweep_values,
             peak_energies          = track.peak_energies,
             peak_errors            = track.peak_errors,
-            slope                  = slope,
-            slope_err              = slope_err,
-            intercept              = intercept,
-            intercept_err          = intercept_err,
+            slope                  = seg.slope,
+            slope_err              = seg.slope_err,
+            intercept              = seg.intercept,
+            intercept_err          = seg.intercept_err,
             dipole_length          = dipole_length,
             dipole_length_err      = dipole_length_err,
-            dipole_length_angstrom = dipole_length * 10.0 if np.isfinite(dipole_length) else np.nan,
-            r_squared              = r_squared,
+            dipole_length_angstrom = (
+                dipole_length * 10.0
+                if np.isfinite(dipole_length) else np.nan
+            ),
+            r_squared              = seg.r_squared,
             peak_model             = track.method,
-            converged_mask         = mask,
+            converged_mask         = seg.mask,
             method                 = fit_method,
-            n_bootstrap            = n_bootstrap if fit_method == "bootstrap" else None,
+            n_bootstrap            = (
+                n_bootstrap if fit_method == "bootstrap" else None
+            ),
         ))
 
     return MultiDipoleResult(
