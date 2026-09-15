@@ -393,4 +393,4 @@ class Dijkstra2025Processor(Processor):
             if result["cosmic_flag"] is not None:
                 hf.create_dataset("cosmic_flag", data=result["cosmic_flag"].astype(np.uint8))
 
-        print(f"  → Saved to {self.out_path}")
+        print(f"  -> Saved to {self.out_path}")

@@ -54,12 +54,14 @@ class Tagarelli2023Processor(Processor):
             "https://zenodo.org/records/7660668/files/Figure%201.zip?download=1"
         )
 
-        # Electric field value (mV/nm) → (zip path, energy slice)
-        # Energy slices follow the original authors' plotting code
+        # Electric field value (mV/nm) → zip path
+        # The authors' plotting code trims noisy edges:
+        #   ef0: [290:-420], ef300/efm300: [10:-10]
+        # Those slices are not applied here — full spectra are kept.
         ef_files = {
-             0:   ("Figure 1d/hb_0field.mat",                          slice(290, -420)),
-            +300: ("Figure 1d/homobilayer_ef300_power_spectral.mat",   slice(10, -10)),
-            -300: ("Figure 1d/homobilayer_efm300_spectral.mat",        slice(10, -10)),
+             0:   "Figure 1d/hb_0field.mat",
+            +300: "Figure 1d/homobilayer_ef300_power_spectral.mat",
+            -300: "Figure 1d/homobilayer_efm300_spectral.mat",
         }
 
         DEFAULT_FIELD = 0
@@ -74,7 +76,7 @@ class Tagarelli2023Processor(Processor):
             ef_sweep.attrs["parameter_unit"] = "mV/nm"
             ef_sweep.attrs["default_value"]  = float(DEFAULT_FIELD)
 
-            for field_val, (zip_path, energy_slice) in ef_files.items():
+            for field_val, zip_path in ef_files.items():
                 print(f"  Processing E={field_val:+d} mV/nm ...")
 
                 with z.open(zip_path) as f:
@@ -90,19 +92,13 @@ class Tagarelli2023Processor(Processor):
                 default_power_idx = self._nearest_power_index(power)
                 default_power_val = float(power[default_power_idx])
 
-                # Sliced energy axis (authors' edge-trimming)
-                energy_sliced = energy[energy_slice]
-
                 # --- Electric field group ---
                 label    = f"{field_val:+d}" if field_val != 0 else "0"
                 ef_group = ef_sweep.create_group(label)
                 ef_group.attrs["parameter_value"]  = float(field_val)
                 ef_group.attrs["is_default"]        = (field_val == DEFAULT_FIELD)
-                ef_group.attrs["energy_slice_start"] = energy_slice.start or 0
-                ef_group.attrs["energy_slice_stop"]  = energy_slice.stop  # may be negative
 
-                # Store sliced energy axis once per field group
-                ef_group.create_dataset("energy", data=energy_sliced)
+                ef_group.create_dataset("energy", data=energy)
                 ef_group.attrs["energy_unit"] = "eV"
 
                 # --- Inner sweep: excitation power ---
@@ -114,7 +110,7 @@ class Tagarelli2023Processor(Processor):
                 pw_sweep.attrs["spectroscopy"] = "PL"
 
                 for i, pwr in enumerate(power):
-                    spectrum_sliced = spectra[:, i][energy_slice]
+                    spectrum = spectra[:, i]
 
                     # Use rounded power as label if available, else raw
                     # Include index as tiebreaker to prevent duplicate group names
@@ -128,10 +124,10 @@ class Tagarelli2023Processor(Processor):
                             pwr_label = f"{pwr:.6f}"
 
                     pw_group = pw_sweep.create_group(pwr_label)
-                    pw_group.create_dataset("spectrum", data=spectrum_sliced)
+                    pw_group.create_dataset("spectrum", data=spectrum)
                     pw_group.attrs["parameter_value"] = pwr
                     pw_group.attrs["power_index"]     = i
                     pw_group.attrs["spectrum_unit"]   = "counts"
                     pw_group.attrs["is_default"]      = (i == default_power_idx)
 
-        print(f"  → Saved to {self.out_path}")
+        print(f"  -> Saved to {self.out_path}")
