@@ -41,7 +41,7 @@ class Lin2024ProcessorWSe2(Processor):
             hf.create_dataset('energy', data = energy)
             hf.create_dataset('spectra', data=spectra)
 
-        print(f"  → Saved to {self.out_path}")
+        print(f"  -> Saved to {self.out_path}")
 
 class Lin2024ProcessorMoS2(Processor):
     """
@@ -74,7 +74,7 @@ class Lin2024ProcessorMoS2(Processor):
             hf.create_dataset('energy', data = energy)
             hf.create_dataset('spectra', data=spectra)
 
-        print(f"  → Saved to {self.out_path}")
+        print(f"  -> Saved to {self.out_path}")
 
 
                 

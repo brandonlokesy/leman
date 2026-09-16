@@ -85,4 +85,4 @@ class Vaquero2026Processor(Processor):
 
                     grp.create_dataset("counts", data=counts)
         
-        print(f"  → Saved to {self.out_path}")
+        print(f"  -> Saved to {self.out_path}")

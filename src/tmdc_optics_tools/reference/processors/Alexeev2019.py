@@ -34,7 +34,7 @@ class Alexeev2019ProcessorMoSe2(Processor):
             hf.create_dataset("spectra", data = spectra_MoSe2)
 
 
-        print(f"  → Saved to {self.out_path}")
+        print(f"  -> Saved to {self.out_path}")
 
 class Alexeev2019ProcessorWS2(Processor):
     """
@@ -61,4 +61,4 @@ class Alexeev2019ProcessorWS2(Processor):
             hf.create_dataset("energy", data = energy)
             hf.create_dataset("spectra", data = spectra_WS2)
 
-        print(f"  → Saved to {self.out_path}")
+        print(f"  -> Saved to {self.out_path}")
