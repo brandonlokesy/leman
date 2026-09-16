@@ -1,4 +1,4 @@
-# Léman — Library for Exciton and Moiré Analysis in Nanostructures
+# LÉMAN — Library for Exciton and Moiré Analysis in Nanostructures
 
 A Python toolkit for TMDC optoelectronics and photonics measurements, developed
 in the LANES group at EPFL. Covers data loading from AttoCube cryogenic confocal
