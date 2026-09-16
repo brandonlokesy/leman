@@ -1,5 +1,5 @@
 """
-What ``import tmdc_optics_tools`` is allowed to drag in.
+What ``import leman`` is allowed to drag in.
 
 scikit-learn is needed by exactly one function, :func:`fitting.fit_sparse_lifetime`,
 and it is a heavy import. Importing it at module level made every user of the
@@ -16,19 +16,19 @@ import sys
 
 import numpy as np
 
-from tmdc_optics_tools import fitting
+from leman import fitting
 
 
 def test_importing_the_package_does_not_import_sklearn():
     probe = (
-        "import sys; import tmdc_optics_tools; "
+        "import sys; import leman; "
         "print(any(m == 'sklearn' or m.startswith('sklearn.') for m in sys.modules))"
     )
     out = subprocess.run(
         [sys.executable, "-c", probe],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
-    assert out == "False", f"import tmdc_optics_tools pulled in scikit-learn ({out})"
+    assert out == "False", f"import leman pulled in scikit-learn ({out})"
 
 
 def test_the_function_that_needs_sklearn_can_still_reach_it():

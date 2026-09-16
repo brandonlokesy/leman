@@ -20,7 +20,7 @@ resolved to the nearest frame. That framing surfaced the real questions: what a 
 index *means* across panels of different kinds, and what should happen when panels
 disagree about how many frames they have.
 
-Two facts constrained the answer. `AttoCubePLScanRealSpace` carries no coordinates at all
+Two facts constrained the answer. `ACImgSweep` carries no coordinates at all
 — it is a folder of images with `n_frames` and `load_frame`, so a coordinate cannot
 address it. And the flat order of a declared nest is fast-inside-slow, so a contiguous
 index range between two grid points is a snake across rows, not a region.

@@ -5,7 +5,7 @@ opens a committed export resolves it the same way whether pytest was started fro
 the repository root, from `tests/`, or from an editor's run button.
 
 Paths built from `DATA` are handed to the loaders as `str`, which is what they
-take today — `AttoCubeSpectralSweep`, `RamanSpectrum` and the rest do
+take today — `ACSpectralSweep`, `RamanSpectrum` and the rest do
 `self.path = str(path)` or pass the argument straight to `np.loadtxt`.
 """
 

@@ -19,7 +19,7 @@ Two things were mixed up in that arrangement.
 the curated registry, gate resolution, sweep-axis resolution, the nest and HDF5
 export — what any sweep from any instrument needs.
 
-**`AttoCubeSpectralSweep` was two classes wearing one name.** Three of the four
+**`ACSpectralSweep` was two classes wearing one name.** Three of the four
 class attributes `dev/architecture.md` calls "the *entire* difference the base
 class sees" describe the measured **axis**, not the instrument: `"wavelength"`,
 `"spectra"`, `"pixels"`. Only `_LAYOUT_KIND` is about the exporter. So "this is
@@ -39,7 +39,7 @@ photodiode voltage; the BigTable writes microwatts.
    independent of *what the measured axis is*. `_SpectralSweep` holds what is
    independent of *which instrument wrote the file*, for a sweep of spectra. A
    loader holds its decoder, its rows and its `__init__`, and nothing else.
-   `AttoCubeTRPLSweep` is a sibling of `_SpectralSweep`, not a child: no energy
+   `ACTRPLSweep` is a sibling of `_SpectralSweep`, not a child: no energy
    axis, no correction ladder.
 
 2. **`_SpectralSweep` defines no `__init__`.** Each loader writes its own
@@ -78,7 +78,7 @@ hook each loader overrides.** Fewer lines, and it was the first design tried. It
 hides an order that has to be got right — the sweep axis cannot be resolved
 before `n_sweeps` exists — behind a call a reader has to go looking for, which
 `dev/architecture.md` §5 had already ruled out for the same reason. It also
-breaks the rendered API page: `AttoCubeSpectralSweep.__init__` carries no
+breaks the rendered API page: `ACSpectralSweep.__init__` carries no
 docstring of its own, so mkdocstrings prints its *signature* above the class
 docstring's parameter table. An inherited `__init__` would print a signature
 with no `roi=` above a table documenting `roi`, and `mkdocs build --strict`
@@ -98,12 +98,12 @@ label.** `power`'s scale and unit differ between the two systems as well, and
 0029 settled that a scale and its unit are one fact that move together. The
 label alone is not the instrument-specific part.
 
-**Subclassing `AttoCubeSpectralSweep` directly for the new instrument.** One
+**Subclassing `ACSpectralSweep` directly for the new instrument.** One
 change instead of five, and no risk to existing behaviour. But BigTable data
 would be an `AttoCube…` object underneath for good, and that name reaches error
 messages, `__repr__` and saved archives.
 
-**Renaming `hdf5.FORMAT_NAME`** (`"tmdc_optics_tools.attocube_sweep"`) to match.
+**Renaming `hdf5.FORMAT_NAME`** (`"leman.attocube_sweep"`) to match.
 It is a string already written into every existing archive.
 
 **Updating the old class name where `dev/defects.md` records what it was called

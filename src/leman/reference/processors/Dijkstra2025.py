@@ -1,4 +1,4 @@
-# src/tmdc_optics_tools/reference/processors/Dijkstra2025.py
+# src/leman/reference/processors/Dijkstra2025.py
 #
 # Dijkstra et al., Nature Communications 2025
 # "Ten-valley excitonic complexes in charge-tunable monolayer WSe2"

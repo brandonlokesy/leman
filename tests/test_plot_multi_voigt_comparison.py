@@ -15,8 +15,8 @@ matplotlib.use("Agg", force=True)
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import plotting
-from tmdc_optics_tools.fitting import fit_multi_voigt, multi_voigt
+from leman import plotting
+from leman.fitting import fit_multi_voigt, multi_voigt
 
 X = np.linspace(0.0, 100.0, 500)
 

@@ -1,4 +1,4 @@
-# tmdc_optics_tools/constants.py
+# leman/constants.py
 
 from scipy.constants import h, c, e, epsilon_0
 
@@ -16,7 +16,7 @@ E_CHARGE = e                   # C
 # means the same thing in a lab file and in a digitised literature dataset.
 # Raman has no entry here because it is not tagged this way at all: it is
 # measured on a separate (LabRAM) instrument and read by its own loaders,
-# RamanSpectrum/RamanMap, rather than by an AttoCubeSpectralSweep carrying
+# RamanSpectrum/RamanMap, rather than by an ACSpectralSweep carrying
 # spectra_type="Raman" — see RAMAN_MODES/RAMAN_LAYER_DISCRIMINATOR below.
 SPECTROSCOPY_TYPES = {
     "PL":   "Photoluminescence",

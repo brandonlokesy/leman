@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.fitting import (
+from leman.fitting import (
     AmplitudeScalingResult,
     AmplitudeScalingSegment,
     DipoleResult,

@@ -26,8 +26,8 @@ from pathlib import Path
 
 import pytest
 
-from tmdc_optics_tools import hdf5
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep, AttoCubeTRPLSweep
+from leman import hdf5
+from leman.loaders import ACSpectralSweep, ACTRPLSweep
 
 from _paths import DATA
 
@@ -69,10 +69,10 @@ _FROM_THE_TRPL_CLASS = {"axis_label", "best_decays", "n_bins"}
 @pytest.mark.parametrize(
     "cls, expected",
     [
-        (AttoCubeSpectralSweep,
+        (ACSpectralSweep,
          _FROM_THE_SWEEP_BASE | _FROM_A_SPECTRAL_SWEEP
          | _FROM_THE_ATTOCUBE_SPECTRAL_CLASS),
-        (AttoCubeTRPLSweep,
+        (ACTRPLSweep,
          _FROM_THE_SWEEP_BASE | _FROM_THE_TRPL_CLASS),
     ],
     ids=["spectral", "trpl"],
@@ -90,13 +90,13 @@ def test_the_spectral_and_temporal_surfaces_stay_distinct():
     # Handing a TRPL sweep to a spectral plot must keep raising rather than
     # drawing time as if it were wavelength, which is what 0008 turns on.
     spectral_only = _FROM_A_SPECTRAL_SWEEP | _FROM_THE_ATTOCUBE_SPECTRAL_CLASS
-    leaked = spectral_only & set(dir(AttoCubeTRPLSweep))
+    leaked = spectral_only & set(dir(ACTRPLSweep))
     assert not leaked, (
-        f"AttoCubeTRPLSweep has grown {sorted(leaked)}, which only means "
+        f"ACTRPLSweep has grown {sorted(leaked)}, which only means "
         f"anything for a wavelength axis."
     )
-    assert "spectra" not in dir(AttoCubeTRPLSweep)
-    assert "decays" not in dir(AttoCubeSpectralSweep)
+    assert "spectra" not in dir(ACTRPLSweep)
+    assert "decays" not in dir(ACSpectralSweep)
 
 
 # --- Which arrays an archive carries ---------------------------------------
@@ -105,9 +105,9 @@ def test_the_signal_datasets_come_from_the_class_not_the_layout():
     # Two instruments can share a wavelength axis and still write a different
     # number of signal arrays, so `_LAYOUT_KIND == "spectral"` is not a valid
     # test for "carries two regions of interest".
-    assert AttoCubeSpectralSweep._HDF5_SIGNALS == (
+    assert ACSpectralSweep._HDF5_SIGNALS == (
         ("roi1", "spectra_roi1"), ("roi2", "spectra_roi2"))
-    assert AttoCubeTRPLSweep._HDF5_SIGNALS == (("counts", "decays"),)
+    assert ACTRPLSweep._HDF5_SIGNALS == (("counts", "decays"),)
 
 
 def test_an_undeclared_signal_table_is_refused_by_name():
@@ -141,7 +141,7 @@ def test_the_jacobian_warning_is_not_blamed_on_the_package():
     """
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        AttoCubeSpectralSweep(SPECTRAL, spectra_type="PL", apply_jacobian=True)
+        ACSpectralSweep(SPECTRAL, spectra_type="PL", apply_jacobian=True)
 
     jacobian = [w for w in caught
                 if "apply_jacobian=True with no background" in str(w.message)]

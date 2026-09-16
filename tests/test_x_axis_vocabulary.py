@@ -27,9 +27,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import fitting, plotting, processing
-from tmdc_optics_tools.constants import X_AXES, _x_axis_name_unit
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep
+from leman import fitting, plotting, processing
+from leman.constants import X_AXES, _x_axis_name_unit
+from leman.loaders import ACSpectralSweep
 
 from test_loaders import make_spectral_csv
 
@@ -38,7 +38,7 @@ from test_loaders import make_spectral_csv
 def scan(tmp_path):
     path = tmp_path / "sweep.csv"
     make_spectral_csv(path)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    return ACSpectralSweep(str(path), spectra_type="PL")
 
 
 @pytest.fixture(autouse=True)
@@ -155,7 +155,7 @@ def wide_scan(tmp_path):
     """
     path = tmp_path / "wide.csv"
     make_spectral_csv(path, wavelength=np.linspace(500.0, 800.0, 31))
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    return ACSpectralSweep(str(path), spectra_type="PL")
 
 
 def _drawn_with_twin(scan, x_axis):

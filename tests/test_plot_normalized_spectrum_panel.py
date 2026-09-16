@@ -13,7 +13,7 @@ matplotlib.use("Agg", force=True)
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import plotting
+from leman import plotting
 
 
 class _FakeScan:

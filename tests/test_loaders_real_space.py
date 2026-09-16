@@ -1,5 +1,5 @@
 """
-Tests for AttoCubePLScanRealSpace frame ordering.
+Tests for ACImgSweep frame ordering.
 
 Frame order is checked synthetically, because every committed export is
 zero-padded and so cannot exhibit the lexicographic failure.  Each synthetic
@@ -14,8 +14,8 @@ import warnings
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.loaders import (
-    AttoCubePLScanRealSpace,
+from leman.loaders import (
+    ACImgSweep,
     _classify_csv,
     _resolve_frame,
 )
@@ -82,7 +82,7 @@ def _pedestal_scan(tmp_path, **kwargs):
     tmp_path.mkdir(parents=True, exist_ok=True)
     for i in (0, 1):
         _pedestal_frame(tmp_path, f"pl_iter_{i}.csv")
-    return AttoCubePLScanRealSpace(tmp_path, prefix="pl_", **kwargs)
+    return ACImgSweep(tmp_path, prefix="pl_", **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ def test_iter_10_sorts_after_iter_2(tmp_path):
     for i in (0, 2, 10):
         _frame(tmp_path, f"pl_iter_{i}.csv", i)
     with pytest.warns(UserWarning, match="missing iteration"):
-        scan = AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        scan = ACImgSweep(tmp_path, prefix="pl_")
 
     assert [f.stem for f in scan.files] == ["pl_iter_0", "pl_iter_2", "pl_iter_10"]
     # The assertion that actually matters: the frame at index 2 is iter_10's data.
@@ -109,7 +109,7 @@ def test_mixed_padding_widths_order_numerically(tmp_path):
     _frame(tmp_path, "pl_iter_000002.csv", 2)
     _frame(tmp_path, "pl_iter_0010.csv", 10)
     with pytest.warns(UserWarning, match="missing iteration"):
-        scan = AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        scan = ACImgSweep(tmp_path, prefix="pl_")
 
     assert np.allclose(scan.load_frame(0), 2.0)
     assert np.allclose(scan.load_frame(1), 10.0)
@@ -120,7 +120,7 @@ def test_consecutive_frames_do_not_warn(tmp_path):
         _frame(tmp_path, f"pl_iter_{i}.csv", i)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        scan = AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        scan = ACImgSweep(tmp_path, prefix="pl_")
 
     assert [str(c.message) for c in caught] == []
     assert scan.n_frames == 3
@@ -135,7 +135,7 @@ def test_gap_in_frames_warns_and_does_not_close_up(tmp_path):
     for i in (0, 2):
         _frame(tmp_path, f"pl_iter_{i}.csv", i)
     with pytest.warns(UserWarning, match=r"missing iteration\(s\) \[1\]"):
-        scan = AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        scan = ACImgSweep(tmp_path, prefix="pl_")
 
     # Nothing is dropped and nothing is invented; index 1 is iteration 2.
     assert scan.n_frames == 2
@@ -146,7 +146,7 @@ def test_frames_without_iter_suffix_warn(tmp_path):
     for name in ("a", "b"):
         _frame(tmp_path, f"pl_{name}.csv", 0)
     with pytest.warns(UserWarning, match="no '_iter_N' suffix"):
-        scan = AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        scan = ACImgSweep(tmp_path, prefix="pl_")
 
     assert [f.stem for f in scan.files] == ["pl_a", "pl_b"]
 
@@ -158,7 +158,7 @@ def test_two_runs_in_one_directory_warn_on_collision(tmp_path):
         _frame(tmp_path, f"pl_iter_{i}.csv", i)
         _frame(tmp_path, f"pl_run2_iter_{i}.csv", 100 + i)
     with pytest.warns(UserWarning, match="claimed by more than one file") as caught:
-        scan = AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        scan = ACImgSweep(tmp_path, prefix="pl_")
 
     # Names the files, not just the count — that is what says two runs were merged.
     assert "pl_run2_iter_0.csv" in str(caught[0].message)
@@ -175,7 +175,7 @@ def test_collision_and_gap_both_warn(tmp_path):
     _frame(tmp_path, "pl_iter_2.csv", 2)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        scan = AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        scan = ACImgSweep(tmp_path, prefix="pl_")
 
     messages = " | ".join(str(c.message) for c in caught)
     assert "claimed by more than one file" in messages
@@ -189,7 +189,7 @@ def test_warning_points_at_the_caller(tmp_path):
     for i in (0, 2):
         _frame(tmp_path, f"pl_iter_{i}.csv", i)
     with pytest.warns(UserWarning) as caught:
-        AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        ACImgSweep(tmp_path, prefix="pl_")
 
     assert caught[0].filename == __file__
 
@@ -202,7 +202,7 @@ def test_warning_points_at_the_caller(tmp_path):
 def test_committed_sequence_loads_without_warnings():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        scan = AttoCubePLScanRealSpace(REAL_DIR, prefix=REAL_PREFIX)
+        scan = ACImgSweep(REAL_DIR, prefix=REAL_PREFIX)
 
     assert [str(c.message) for c in caught] == []
     assert scan.n_frames == REAL_FRAMES
@@ -252,7 +252,7 @@ def test_directory_of_single_spectra_raises(tmp_path):
     for i in (0, 1, 2):
         _spectrum(tmp_path, f"pl_iter_{i}.csv")
     with pytest.raises(ValueError) as excinfo:
-        AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        ACImgSweep(tmp_path, prefix="pl_")
 
     message = str(excinfo.value)
     assert "SingleSpectrum" in message          # says where to take them instead
@@ -261,8 +261,8 @@ def test_directory_of_single_spectra_raises(tmp_path):
 
 def test_temporal_export_alone_names_the_trpl_loader(tmp_path):
     _export(tmp_path, "pl_iter_0.csv", TEMPORAL_ROLES)
-    with pytest.raises(ValueError, match="AttoCubeTRPLSweep"):
-        AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+    with pytest.raises(ValueError, match="ACTRPLSweep"):
+        ACImgSweep(tmp_path, prefix="pl_")
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +275,7 @@ def test_stray_spectrum_among_frames_is_excluded_and_named(tmp_path):
         _frame(tmp_path, f"pl_iter_{i}.csv", i)
     _spectrum(tmp_path, "pl_ref.csv")
     with pytest.warns(UserWarning, match="not real-space images") as caught:
-        scan = AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        scan = ACImgSweep(tmp_path, prefix="pl_")
 
     assert "pl_ref.csv" in str(caught[0].message)
     assert [f.stem for f in scan.files] == ["pl_iter_0", "pl_iter_1", "pl_iter_2"]
@@ -289,7 +289,7 @@ def test_export_among_frames_is_excluded_in_silence(tmp_path):
     _export(tmp_path, "pl_params.csv", SPECTRAL_ROLES)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        scan = AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        scan = ACImgSweep(tmp_path, prefix="pl_")
 
     assert [str(c.message) for c in caught] == []
     assert scan.n_frames == 3
@@ -302,7 +302,7 @@ def test_skip_warning_points_at_the_caller(tmp_path):
         _frame(tmp_path, f"pl_iter_{i}.csv", i)
     _spectrum(tmp_path, "pl_ref.csv")
     with pytest.warns(UserWarning) as caught:
-        AttoCubePLScanRealSpace(tmp_path, prefix="pl_")
+        ACImgSweep(tmp_path, prefix="pl_")
 
     assert caught[0].filename == __file__
 
@@ -389,7 +389,7 @@ def test_spectral_companion_excluded_despite_iter_0_collision():
     # The timestamped spectral export in this directory also ends "_iter_0", so it
     # would collide on index 0 with iter_0000 if it ever passed the numeric-grid
     # check. It is excluded by content, which is what keeps the indices distinct.
-    scan = AttoCubePLScanRealSpace(REAL_DIR, prefix=REAL_PREFIX)
+    scan = ACImgSweep(REAL_DIR, prefix=REAL_PREFIX)
 
     assert REAL_SPECTRAL not in [f.name for f in scan.files]
     assert scan.n_frames == REAL_FRAMES

@@ -1,4 +1,4 @@
-# tmdc_optics_tools/plotting.py
+# leman/plotting.py
 """
 Plotting helpers for TMD spectroscopy.
 
@@ -33,7 +33,7 @@ from .constants import HC_EV_NM, _x_axis_name_unit
 # callers of ``spectra_source=`` and ``frame_source=`` are.
 from .loaders import _SPECTRA_SOURCES, _resolve_spectra, _resolve_frame
 
-# Optional colormap packages (pip install "tmdc_optics_tools[colormaps]").
+# Optional colormap packages (pip install "leman[colormaps]").
 # Imported for their side effect alone: each registers its colormaps into
 # Matplotlib's registry under a prefix — "cmc.vik", "cmo.thermal" — which is how
 # get_cmap reaches them.  Nothing below refers to either package by name, so the
@@ -407,7 +407,7 @@ def _signal_name_unit(obj, source: str = None) -> tuple:
     so it takes the contrast label and an empty unit.
 
     Objects that declare no measurement type fall back to a neutral
-    "Intensity" / "counts" — a :class:`~tmdc_optics_tools.loaders.SingleSpectrum`
+    "Intensity" / "counts" — a :class:`~leman.loaders.SingleSpectrum`
     is a 2-row CSV as likely to be a bare-substrate reflectance reference as PL.
     """
     if source == "contrast":
@@ -479,11 +479,11 @@ def _resolve_sweep_block(scan, *, fast=None, index_fast=None,
     nest is pinned on one of its two axes, and the axis left free is the one the
     spectra run along.  Either way *data* comes back ``(n_pixels, n)`` and *coord*
     is the matching ``(n,)`` array, so a caller never branches on
-    :attr:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep.is_nested`.
+    :attr:`~leman.loaders.ACSpectralSweep.is_nested`.
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep
+    scan : ACSpectralSweep
     fast, slow : float, optional
         Coordinate at which to hold that nest axis.  Nested scans only.
     index_fast, index_slow : int, optional
@@ -496,7 +496,7 @@ def _resolve_sweep_block(scan, *, fast=None, index_fast=None,
         The caller's own name for *axis*, interpolated into the message that
         refuses it, so the error names the keyword that was typed.
     spectra_source : str
-        A :data:`~tmdc_optics_tools.loaders._SPECTRA_SOURCES` key.
+        A :data:`~leman.loaders._SPECTRA_SOURCES` key.
     x_axis : {"energy", "wavelength"}
         Which spectral ordering *spectra_source* is served on.
     what : str
@@ -519,8 +519,8 @@ def _resolve_sweep_block(scan, *, fast=None, index_fast=None,
     Notes
     -----
     Selection is not re-implemented here: a nest goes through
-    :meth:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep.get_spectrum_at` and
-    :meth:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep.get_spectrum_by_index`,
+    :meth:`~leman.loaders.ACSpectralSweep.get_spectrum_at` and
+    :meth:`~leman.loaders.ACSpectralSweep.get_spectrum_by_index`,
     so an ambiguous coordinate is refused and a distant one warns exactly as they
     do.
     """
@@ -631,7 +631,7 @@ def plot_spectral_map(
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep
+    scan : ACSpectralSweep
     ax : matplotlib.axes.Axes, optional
         Creates a new figure if ``None``.
     figsize : tuple
@@ -729,9 +729,9 @@ def plot_spectral_map(
 
     See Also
     --------
-    tmdc_optics_tools.loaders.AttoCubeSpectralSweep.get_spectrum_at :
+    leman.loaders.ACSpectralSweep.get_spectrum_at :
         the spectra a pinned nest axis selects, without drawing them.
-    tmdc_optics_tools.loaders.AttoCubeSpectralSweep.as_grid :
+    leman.loaders.ACSpectralSweep.as_grid :
         a nested sweep reshaped onto its grid, rather than pinned to a line.
 
     Examples
@@ -1025,7 +1025,7 @@ def plot_spectrum(
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep
+    scan : ACSpectralSweep
     value : float, optional
         Coordinate on the sweep axis, in that axis's units.  For a flat sweep;
         a nest is addressed with *fast* and *slow*.
@@ -1092,7 +1092,7 @@ def plot_spectrum(
 
     See Also
     --------
-    tmdc_optics_tools.loaders.AttoCubeSpectralSweep.get_spectrum_at :
+    leman.loaders.ACSpectralSweep.get_spectrum_at :
         the same selection, returning the array instead of drawing it.
     plot_single_spectrum : plot a spectrum that is not part of a sweep.
 
@@ -1149,7 +1149,7 @@ def plot_single_spectrum(
 ) -> tuple:
     """
     Plot a spectrum held in a
-    :class:`~tmdc_optics_tools.loaders.SingleSpectrum`.
+    :class:`~leman.loaders.SingleSpectrum`.
 
     Parameters
     ----------
@@ -1211,12 +1211,12 @@ def plot_spectra_overlay(
     Raw and min-max-normalized overlay of several spectra and/or fits.
 
     Each entry in *entries* is either a plain array of y-values (sharing
-    *x*) or a :class:`~tmdc_optics_tools.fitting.FitResult` — decided per
+    *x*) or a :class:`~leman.fitting.FitResult` — decided per
     entry, not by a caller-chosen mode, so a set of points where only some
     were fit still draws in one call and one figure.
 
     A plain-array entry draws one line, normalized independently via
-    :func:`~tmdc_optics_tools.processing.normalise_minmax` (there is no fit
+    :func:`~leman.processing.normalise_minmax` (there is no fit
     for it to visually agree or disagree with). A ``FitResult`` entry draws
     its data (recovered as ``result.residuals + result.y_fit`` — exact, that
     is the definition of the residual — on its own ``result.x_fit``; the
@@ -1232,9 +1232,9 @@ def plot_spectra_overlay(
         Resolving a coordinate to an entry is the caller's job, since it
         differs by loader — e.g. ``scan.get_spectrum_at(fast=, slow=)`` for a
         nested AttoCube sweep, or ``raman_map.spectrum_at(*raman_map.nearest_index(x, y))``
-        for a :class:`~tmdc_optics_tools.loaders.RamanMap`. Pass a
-        :func:`~tmdc_optics_tools.fitting.fit_multi_voigt` result (or a
-        wrapper's, e.g. :func:`~tmdc_optics_tools.fitting.fit_raman_modes`)
+        for a :class:`~leman.loaders.RamanMap`. Pass a
+        :func:`~leman.fitting.fit_multi_voigt` result (or a
+        wrapper's, e.g. :func:`~leman.fitting.fit_raman_modes`)
         for any point that was fit.
     x : array-like, optional
         Shared x-axis for any plain-array entries. Unused by, and not
@@ -1247,7 +1247,7 @@ def plot_spectra_overlay(
         (norm.)", not "PL intensity (counts) (norm.)") and only a caller that
         knows the signal's name can build that string.
     smooth_window, smooth_poly : int, optional
-        Forwarded to :func:`~tmdc_optics_tools.processing.maybe_smooth`, run
+        Forwarded to :func:`~leman.processing.maybe_smooth`, run
         once per plain-array entry before either panel is drawn — not
         applied to a ``FitResult`` entry's data, which was already the array
         the fit itself ran on. ``smooth_window=None`` (default) skips
@@ -1321,7 +1321,7 @@ def plot_current(
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep
+    scan : ACSpectralSweep
     ax : matplotlib.axes.Axes, optional
         Must be a standard (non-twin) axes.
     ef_axis : bool
@@ -1472,11 +1472,11 @@ def plot_real_space_PL_map(
 ) -> tuple:
     """
     Plot a single real-space PL map from an
-    :class:`~tmdc_optics_tools.loaders.AttoCubePLScanRealSpace`.
+    :class:`~leman.loaders.ACImgSweep`.
 
     Parameters
     ----------
-    scan : AttoCubePLScanRealSpace
+    scan : ACImgSweep
     ax : matplotlib.axes.Axes, optional
     idx : int
         Frame index to display.
@@ -1530,12 +1530,12 @@ def plot_image(
     ----------
     image : np.ndarray or object with ``.img``
         A 2-D array, or any object exposing a 2-D ``img`` attribute
-        (e.g. :class:`~tmdc_optics_tools.loaders.SingleImage`,
-        :class:`~tmdc_optics_tools.loaders.AttoCubeSampleImage`).
+        (e.g. :class:`~leman.loaders.SingleImage`,
+        :class:`~leman.loaders.ACSampleImg`).
         ``NaN`` entries are masked (drawn as nothing) rather than colored at
         the scale's low end, so "not computed here" stays visually distinct
         from "computed and found to be small" — e.g. a
-        :class:`~tmdc_optics_tools.loaders.RamanMap` mode fit only over part
+        :class:`~leman.loaders.RamanMap` mode fit only over part
         of the grid.
     ax : matplotlib.axes.Axes, optional
         Creates a new figure if ``None``.
@@ -1573,7 +1573,7 @@ def plot_image(
         up.  With an explicit *extent* the axis numbers increase upward either
         way, so this flips the data rather than the axis: a map whose row 0
         holds its smallest Y — as
-        :class:`~tmdc_optics_tools.loaders.RamanMap` builds — needs
+        :class:`~leman.loaders.RamanMap` builds — needs
         ``"lower"``, or it is drawn mirrored against correct axis labels.
     laser_annotation : bool
         Overlay the 1/e² laser-spot boundary.  This is the only switch: with
@@ -1854,11 +1854,11 @@ def animate_real_space_PL_map(
 ) -> tuple:
     """
     Animate a sequence of real-space PL maps from an
-    :class:`~tmdc_optics_tools.loaders.AttoCubePLScanRealSpace`.
+    :class:`~leman.loaders.ACImgSweep`.
 
     Parameters
     ----------
-    scan : AttoCubePLScanRealSpace
+    scan : ACImgSweep
     ax : matplotlib.axes.Axes, optional
     var_array : array-like, optional
         Values of the swept parameter, one per frame (e.g. electric field,
@@ -1974,7 +1974,7 @@ def plot_stark_shift(
     Parameters
     ----------
     dipole_result : DipoleResult
-        Output of :func:`~tmdc_optics_tools.fitting.extract_dipole_length`.
+        Output of :func:`~leman.fitting.extract_dipole_length`.
     ax : matplotlib.axes.Axes, optional
     show_fit : bool
         Overlay the best-fit line.
@@ -2046,12 +2046,12 @@ def plot_peak_track(
 
     Draws peak energy vs. the sweep coordinate (or vs. sweep index).
     Optionally highlights coordinate ranges by colour to help choose
-    ranges for :func:`~tmdc_optics_tools.fitting.extract_dipole_lengths`.
+    ranges for :func:`~leman.fitting.extract_dipole_lengths`.
 
     Parameters
     ----------
     track : PeakTrack
-        Output of :func:`~tmdc_optics_tools.fitting.track_peak_energies`.
+        Output of :func:`~leman.fitting.track_peak_energies`.
     x_axis : {"sweep", "energy", "index"}
         ``"sweep"`` (default) puts the sweep coordinate on x and peak
         energy on y.  ``"energy"`` swaps them — peak energy on x, sweep
@@ -2171,7 +2171,7 @@ def plot_multi_stark_shift(
     Parameters
     ----------
     result : MultiDipoleResult
-        Output of :func:`~tmdc_optics_tools.fitting.extract_dipole_lengths`.
+        Output of :func:`~leman.fitting.extract_dipole_lengths`.
     x_axis : {"sweep", "energy"}
         ``"sweep"`` (default) puts the sweep coordinate on the x-axis
         and peak energy on y.  ``"energy"`` swaps them — energy on x,
@@ -2292,7 +2292,7 @@ def plot_rise_time_vs_distance(
     Plot fitted rise time vs. distance from the excitation spot.
 
     One point per measurement location, e.g. the ``tau_rise`` of a
-    :class:`~tmdc_optics_tools.fitting.SparseLifetimeResult` against that
+    :class:`~leman.fitting.SparseLifetimeResult` against that
     spot's distance from the excitation laser.
 
     Parameters
@@ -2413,7 +2413,7 @@ class ImageSequencePanel(AnimationPanel):
     A panel that animates a sequence of real-space images.
 
     Wraps an
-    :class:`~tmdc_optics_tools.loaders.AttoCubePLScanRealSpace` (or any object
+    :class:`~leman.loaders.ACImgSweep` (or any object
     exposing ``n_frames`` and ``load_frame(idx)``).  Frame 0 is drawn with
     :func:`plot_real_space_PL_map`; subsequent frames swap the image data.  If
     the scan carries a ``laser_ref`` and *laser_annotation* is ``True``, the
@@ -2422,7 +2422,7 @@ class ImageSequencePanel(AnimationPanel):
 
     Parameters
     ----------
-    scan : AttoCubePLScanRealSpace
+    scan : ACImgSweep
     title : str
         Per-panel heading.
     cmap : str, Colormap, or sequence of colours
@@ -2518,7 +2518,7 @@ class SpectrumLinePanel(AnimationPanel):
     """
     A panel that animates one PL spectrum per frame.
 
-    Wraps an :class:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep` (or any object
+    Wraps an :class:`~leman.loaders.ACSpectralSweep` (or any object
     exposing ``energy``/``wavelength`` plus ``best_energy_spectra``/``best_spectra``
     of shape ``(n_pixels, n_sweeps)``).  The x-axis is fixed; each frame swaps
     the y-values and updates a per-panel subtitle showing the swept value.
@@ -2528,7 +2528,7 @@ class SpectrumLinePanel(AnimationPanel):
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep
+    scan : ACSpectralSweep
     x_axis : {"energy", "wavelength"}
     sweep_attr : str
         Name of the per-sweep array used for the subtitle value
@@ -2724,7 +2724,7 @@ class NormalizedSpectrumPanel(AnimationPanel):
     which is the right choice when comparing absolute intensity is the
     point. Here it is not: a weak frame would otherwise be flattened to a
     sliver next to a bright one. Each spectrum is instead normalized to its
-    own [0, 1] range (:func:`~tmdc_optics_tools.processing.normalise_minmax`)
+    own [0, 1] range (:func:`~leman.processing.normalise_minmax`)
     so every frame fills the same vertical extent — and the intensity that
     normalizing throws away is put back as the line's *colour*, via a
     colormap spanning the peak intensity's *global* range across every
@@ -2733,14 +2733,14 @@ class NormalizedSpectrumPanel(AnimationPanel):
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep (or any object exposing ``energy``/
+    scan : ACSpectralSweep (or any object exposing ``energy``/
         ``wavelength`` plus ``best_energy_spectra``/``spectra`` of shape
         ``(n_pixels, n_sweeps)``)
     x_axis : {"energy", "wavelength"}
     secondary_x_axis : bool
         Add the other of energy/wavelength as a secondary top axis, via
-        :func:`~tmdc_optics_tools.processing.energy_to_wavelength` /
-        :func:`~tmdc_optics_tools.processing.wavelength_to_energy`.
+        :func:`~leman.processing.energy_to_wavelength` /
+        :func:`~leman.processing.wavelength_to_energy`.
     cmap : str or None
         Colormap name passed to :func:`get_cmap`, mapping each frame's peak
         intensity to a line colour, with a colorbar showing that scale.
@@ -2751,7 +2751,7 @@ class NormalizedSpectrumPanel(AnimationPanel):
         from a plain colour: ``cmap`` says a data channel (peak intensity) is
         drawn through colour, ``None`` says it isn't — not a colour name.
     smooth_window, smooth_poly : int or None
-        Forwarded to :func:`~tmdc_optics_tools.processing.smooth_savgol`,
+        Forwarded to :func:`~leman.processing.smooth_savgol`,
         run once per spectrum before either the colour metric or the
         normalized curve is computed, so both reflect the same smoothed
         data rather than two disagreeing versions of it. ``smooth_window=None``
@@ -2911,7 +2911,7 @@ class TrimmedImageSequence:
     Parameters
     ----------
     base_scan : object exposing ``load_frame(idx)``
-        E.g. :class:`~tmdc_optics_tools.loaders.AttoCubePLScanRealSpace`.
+        E.g. :class:`~leman.loaders.ACImgSweep`.
     frame_indices : iterable of int
         Which of *base_scan*'s frames to expose, and in what order — a
         contiguous range trims, an arbitrary permutation reorders.
@@ -2940,15 +2940,15 @@ class GridImageSequence:
     :class:`ImageSequencePanel`-compatible sequence.
 
     For a stack already reshaped or reordered outside any loader — e.g.
-    :meth:`~tmdc_optics_tools.loaders._Sweep.as_image_grid` followed
-    by :func:`~tmdc_optics_tools.processing.reorder_grid` — rather than one
+    :meth:`~leman.loaders._Sweep.as_image_grid` followed
+    by :func:`~leman.processing.reorder_grid` — rather than one
     that still has a ``load_frame`` of its own to forward to, which is what
     :class:`TrimmedImageSequence` is for.
 
     Parameters
     ----------
     frames : np.ndarray, shape (height, width, n_frames)
-    laser_ref : AttoCubeLaserReferenceImage, optional
+    laser_ref : ACLaserRefImg, optional
     """
 
     def __init__(self, frames, laser_ref=None):
@@ -2969,8 +2969,8 @@ class GridSweep:
     :class:`NormalizedSpectrumPanel`-compatible scan.
 
     For per-frame arrays already reshaped or reordered — e.g. via
-    :meth:`~tmdc_optics_tools.loaders._Sweep.as_grid` followed by
-    :func:`~tmdc_optics_tools.processing.reorder_grid` — since the original
+    :meth:`~leman.loaders._Sweep.as_grid` followed by
+    :func:`~leman.processing.reorder_grid` — since the original
     sweep object's own arrays are in the wrong order for that reordering to
     apply to directly.
 
@@ -3117,7 +3117,7 @@ def frame_window(scan, start=None, end=None, *, axis=None) -> range:
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep
+    scan : ACSpectralSweep
         The scan whose coordinates *start* and *end* refer to.
     start, end : float, optional
         Coordinates on *axis*.  Each resolves to its nearest sweep point, with the
@@ -3412,19 +3412,19 @@ def animate_wl_pl_spectra(
 
     Parameters
     ----------
-    wl, pl : (dir, prefix) tuple or AttoCubePLScanRealSpace or None
+    wl, pl : (dir, prefix) tuple or ACImgSweep or None
         White-light and real-space-PL image sequences.  A ``(dir, prefix)``
         tuple is loaded into an
-        :class:`~tmdc_optics_tools.loaders.AttoCubePLScanRealSpace`; an existing
+        :class:`~leman.loaders.ACImgSweep`; an existing
         scan object is used as-is.
-    spectra : str or AttoCubeSpectralSweep or None
+    spectra : str or ACSpectralSweep or None
         Spectrum line-scan.  A path is loaded into an
-        :class:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep` with
+        :class:`~leman.loaders.ACSpectralSweep` with
         ``spectra_type="PL"``; pass a pre-built sweep for any other measurement
         type or to declare a ``sweep=``.
-    laser_ref : str or AttoCubeLaserReferenceImage or None
+    laser_ref : str or ACLaserRefImg or None
         Shared laser-spot reference for the image panels.  A path is loaded
-        into an :class:`~tmdc_optics_tools.loaders.AttoCubeLaserReferenceImage`
+        into an :class:`~leman.loaders.ACLaserRefImg`
         (with *laser_ref_kwargs*).
     x_axis : {"energy", "wavelength"}
         Spectrum panel x-axis.
@@ -3436,7 +3436,7 @@ def animate_wl_pl_spectra(
         Per-sweep attribute and unit shown in the spectrum subtitle.
     laser_ref_kwargs : dict, optional
         Extra keyword arguments for
-        :class:`~tmdc_optics_tools.loaders.AttoCubeLaserReferenceImage` when
+        :class:`~leman.loaders.ACLaserRefImg` when
         *laser_ref* is a path (e.g. ``{"expected_radius_px": 10}``).
     laser_style : dict, optional
         Laser-circle styling forwarded to both image
@@ -3497,31 +3497,31 @@ def animate_wl_pl_spectra(
     >>> panels[-1].ax_twin.tick_params(labelsize=6)     # doctest: +SKIP
     """
     from .loaders import (
-        AttoCubePLScanRealSpace,
-        AttoCubeSpectralSweep,
-        AttoCubeLaserReferenceImage,
+        ACImgSweep,
+        ACSpectralSweep,
+        ACLaserRefImg,
         _SpectralSweep,
     )
 
     # Resolve the shared laser reference (path -> loader, object -> as-is).
     if isinstance(laser_ref, (str, Path)):
-        laser_ref = AttoCubeLaserReferenceImage(
+        laser_ref = ACLaserRefImg(
             str(laser_ref), **(laser_ref_kwargs or {})
         )
 
     def _image_scan(spec):
         if spec is None:
             return None
-        if isinstance(spec, AttoCubePLScanRealSpace):
+        if isinstance(spec, ACImgSweep):
             return spec
         directory, prefix = spec
-        return AttoCubePLScanRealSpace(
+        return ACImgSweep(
             path=str(directory), prefix=prefix, laser_ref=laser_ref,
         )
 
     def _spectrum_scan(spec):
         # Any sweep of spectra, from any instrument, and so also the
-        # deprecated AttoCubePLVabScan.  Tested against the shared base
+        # deprecated ACPLVabScan.  Tested against the shared base
         # rather than one instrument's class, because the alternative —
         # treating an unrecognised scan as a path and calling str() on it
         # — fails somewhere far less obvious.
@@ -3529,7 +3529,7 @@ def animate_wl_pl_spectra(
             return spec
         # A bare path: this function animates PL, so declare it rather than
         # letting the loader guess.  Pass a pre-built sweep for anything else.
-        return AttoCubeSpectralSweep(path=str(spec), spectra_type="PL")
+        return ACSpectralSweep(path=str(spec), spectra_type="PL")
 
     laser_style    = laser_style or {}
     spectrum_style = spectrum_style or {}
@@ -3588,7 +3588,7 @@ def trim_to_sweep_count(image_scan, n_sweeps: int, auto_trim: bool = True):
     The AttoCube acquisition can leave one extra frame (e.g. white light) at
     the end of an image sequence relative to a paired spectral sweep. That is
     what the exporter does, not a corrupted sequence.
-    :meth:`~.AttoCubeSpectralSweep.as_image_grid` and
+    :meth:`~.ACSpectralSweep.as_image_grid` and
     :func:`animate_wl_pl_spectra_grid` both need an exact frame-count match,
     so this is where that quirk gets handled, once, rather than at every call
     site that runs into it.
@@ -3596,7 +3596,7 @@ def trim_to_sweep_count(image_scan, n_sweeps: int, auto_trim: bool = True):
     Parameters
     ----------
     image_scan : object exposing ``n_frames`` and ``load_frame(idx)``
-        E.g. :class:`~tmdc_optics_tools.loaders.AttoCubePLScanRealSpace`.
+        E.g. :class:`~leman.loaders.ACImgSweep`.
     n_sweeps : int
         The frame count *image_scan* is expected to match.
     auto_trim : bool
@@ -3604,7 +3604,7 @@ def trim_to_sweep_count(image_scan, n_sweeps: int, auto_trim: bool = True):
         :class:`TrimmedImageSequence` keeping only the first *n_sweeps*, with
         a ``UserWarning`` naming how many frames were dropped. ``False``
         returns *image_scan* unchanged, so a caller that requires an exact
-        match (e.g. :meth:`~.AttoCubeSpectralSweep.as_image_grid`) raises its
+        match (e.g. :meth:`~.ACSpectralSweep.as_image_grid`) raises its
         own, more specific error instead.
 
     Returns
@@ -3662,11 +3662,11 @@ def animate_wl_pl_spectra_grid(
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep
+    scan : ACSpectralSweep
         Must carry a declared nest (``fast_sweep=`` / ``slow_sweep=`` at load
-        time) — raises the same way :meth:`~.AttoCubeSpectralSweep.as_grid`
+        time) — raises the same way :meth:`~.ACSpectralSweep.as_grid`
         does otherwise.
-    wl, pl : AttoCubePLScanRealSpace, optional
+    wl, pl : ACImgSweep, optional
         White-light and real-space-PL image sequences, one frame per *scan*
         sweep point. Omit one (leave it ``None``) and the figure drops to two
         (or one) panels, the same convention as :func:`animate_wl_pl_spectra`.
@@ -3696,7 +3696,7 @@ def animate_wl_pl_spectra_grid(
         to the first ``scan.n_sweeps`` — the AttoCube exporter can write one
         frame more than its paired sweep — with a ``UserWarning``
         naming how many frames were dropped. ``False`` raises instead, via
-        :meth:`~.AttoCubeSpectralSweep.as_image_grid`'s own error.
+        :meth:`~.ACSpectralSweep.as_image_grid`'s own error.
     save : str, optional
         As :func:`animate_wl_pl_spectra`.
     **engine_kwargs
@@ -3769,7 +3769,7 @@ def _draw_laser_circle(
     Parameters
     ----------
     ax : matplotlib.axes.Axes
-    laser_ref : AttoCubeLaserReferenceImage
+    laser_ref : ACLaserRefImg
         Must expose ``center_x``, ``center_y``, and ``radius`` attributes.
     color : str
         Edge colour of the circle.
@@ -3852,21 +3852,21 @@ def plot_diffusion_cloud(
     Plot a single real-space PL image with the diffusion cloud boundary and
     centroid overlaid.
 
-    You can either supply a pre-computed :class:`~tmdc_optics_tools.diffusion.DiffusionResult`
+    You can either supply a pre-computed :class:`~leman.diffusion.DiffusionResult`
     via *result*, or let the function run the analysis internally (using the
-    keyword arguments that mirror :func:`~tmdc_optics_tools.diffusion.analyse_diffusion_cloud`).
+    keyword arguments that mirror :func:`~leman.diffusion.analyse_diffusion_cloud`).
 
     Parameters
     ----------
-    image : np.ndarray, str, pathlib.Path, or _AttoCubeImage
+    image : np.ndarray, str, pathlib.Path, or _ACImg
         2-D PL image, forwarded as-is to
-        :func:`~tmdc_optics_tools.diffusion.analyse_diffusion_cloud` when
+        :func:`~leman.diffusion.analyse_diffusion_cloud` when
         *result* is ``None`` (same accepted types — see that function).
         Ignored when *result* is supplied: display then uses
-        :attr:`~tmdc_optics_tools.diffusion.DiffusionResult.image` from
+        :attr:`~leman.diffusion.DiffusionResult.image` from
         *result* itself, so the two never disagree about what was analysed.
     result : DiffusionResult, optional
-        Pre-computed result from :func:`~tmdc_optics_tools.diffusion.analyse_diffusion_cloud`.
+        Pre-computed result from :func:`~leman.diffusion.analyse_diffusion_cloud`.
         When ``None`` the analysis is run here with the remaining kwargs.
     ax : matplotlib.axes.Axes, optional
         Creates a new figure if ``None``.
@@ -3879,11 +3879,11 @@ def plot_diffusion_cloud(
     colorbar : bool
     colorbar_label : str
     xlabel, ylabel : str
-    laser_ref : AttoCubeLaserReferenceImage or None
+    laser_ref : ACLaserRefImg or None
         Laser-spot reference.  When supplied (and *laser_annotation* is
         ``True``), the 1/e² spot boundary circle is drawn on the axes.
         Can also be passed implicitly via ``image.laser_ref`` (i.e. from
-        :class:`~tmdc_optics_tools.loaders.AttoCubePLScanRealSpace` which
+        :class:`~leman.loaders.ACImgSweep` which
         stores it); an explicit *laser_ref* argument takes priority.
     laser_annotation : bool
         Draw the laser circle when *laser_ref* is available.  Default ``True``.
@@ -3899,7 +3899,7 @@ def plot_diffusion_cloud(
     laser_halo_color : str
         Colour of the halo stroke.  Default ``"white"``.
     threshold, smooth_sigma, keep_largest, pixel_scale, origin
-        Forwarded to :func:`~tmdc_optics_tools.diffusion.analyse_diffusion_cloud`
+        Forwarded to :func:`~leman.diffusion.analyse_diffusion_cloud`
         when *result* is ``None``.
 
     Returns
@@ -3910,7 +3910,7 @@ def plot_diffusion_cloud(
     """
     if result is None:
         # Pass the image object/path/array straight through -- _load_image
-        # already knows to use an _AttoCubeImage's *raw* array so that the
+        # already knows to use an _ACImg's *raw* array so that the
         # bg_region below is the only subtraction that happens. Handing it
         # an already-corrected `.img` here would subtract twice.
         result = _diffusion.analyse_diffusion_cloud(
@@ -3995,7 +3995,7 @@ def plot_centroid_trajectory(
     Parameters
     ----------
     seq_result : DiffusionSequenceResult
-        Output of :func:`~tmdc_optics_tools.diffusion.analyse_diffusion_sequence`.
+        Output of :func:`~leman.diffusion.analyse_diffusion_sequence`.
     ax : matplotlib.axes.Axes, optional
         Creates a new figure if ``None``.
     coord : {``"x"``, ``"y"``, ``"both"``}
@@ -4078,9 +4078,9 @@ class DiffusionCloudPanel(AnimationPanel):
 
     Parameters
     ----------
-    scan : AttoCubePLScanRealSpace or list of np.ndarray
+    scan : ACImgSweep or list of np.ndarray
         Image sequence.  Any object exposing ``load_frame(idx)`` and
-        ``n_frames`` (e.g. :class:`~tmdc_optics_tools.loaders.AttoCubePLScanRealSpace`),
+        ``n_frames`` (e.g. :class:`~leman.loaders.ACImgSweep`),
         or a plain list of 2-D arrays.
     seq_result : DiffusionSequenceResult, optional
         Pre-computed sequence result.  When ``None`` the analysis is run
@@ -4111,7 +4111,7 @@ class DiffusionCloudPanel(AnimationPanel):
     var_fmt : str
         Python format spec for the numeric value (e.g. ``\".3g\"``).
     threshold, smooth_sigma, keep_largest, pixel_scale, origin
-        Forwarded to :func:`~tmdc_optics_tools.diffusion.analyse_diffusion_sequence`
+        Forwarded to :func:`~leman.diffusion.analyse_diffusion_sequence`
         when *seq_result* is ``None``.
 
     Examples
@@ -4436,7 +4436,7 @@ def plot_spectral_series(
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep
+    scan : ACSpectralSweep
         Must expose ``sweep_axis``, ``energy`` / ``wavelength``, and the chosen
         *spectra_source* attribute.  A nested scan must have been loaded with
         ``fast_sweep=`` and ``slow_sweep=``.
@@ -4602,9 +4602,9 @@ def plot_spectral_series(
 
     See Also
     --------
-    tmdc_optics_tools.loaders.AttoCubeSpectralSweep.get_spectrum_at :
+    leman.loaders.ACSpectralSweep.get_spectrum_at :
         one spectrum at a coordinate, rather than the series.
-    tmdc_optics_tools.loaders.AttoCubeSpectralSweep.as_grid :
+    leman.loaders.ACSpectralSweep.as_grid :
         a nested sweep reshaped onto its grid, rather than pinned to a line.
 
     Examples

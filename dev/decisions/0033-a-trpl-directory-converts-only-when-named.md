@@ -14,7 +14,7 @@ one output out. **A TRPL sweep is not.** One TCSPC decay is one file and the swe
 is the whole directory, so converting it means deciding which files in that
 directory belong to one measurement.
 
-`AttoCubeTRPLSweep._decode_dir` already answers most of that, and answers it well:
+`ACTRPLSweep._decode_dir` already answers most of that, and answers it well:
 an IRF reference is excluded by *name* (its `[Par, Wavelength, Exp]` header is
 identical to a real decay, so content cannot settle it), a spectral-header file in
 a TRPL folder is read as the parameter-table companion rather than a sweep, and

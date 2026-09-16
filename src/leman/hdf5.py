@@ -1,4 +1,4 @@
-# tmdc_optics_tools/hdf5.py
+# leman/hdf5.py
 """
 Self-describing HDF5 storage for AttoCube sweeps.
 
@@ -48,8 +48,8 @@ Layout
 The axis dataset is **named for the physical quantity it holds**, so ``h5ls``
 alone says what kind of measurement a file contains; ``metadata/axis_kind``
 records it authoritatively as well.  Which loader may read a file follows from
-it, exactly as the header decides for a CSV — :class:`AttoCubeSpectralSweep` and
-:class:`AttoCubeTRPLSweep` each reject the other's archives by name.  There is no
+it, exactly as the header decides for a CSV — :class:`ACSpectralSweep` and
+:class:`ACTRPLSweep` each reject the other's archives by name.  There is no
 factory: the caller names the class they expect, and is told when they are wrong.
 
 Scalars live in group **attributes** rather than as 0-d datasets: that is the
@@ -86,7 +86,7 @@ say what the measurement *was* — how it was wired, how it was nested — and a
 one.  So ``apply_jacobian``, ``bg_region_nm`` / ``bg_region_ns``, ``cosmic_rays``, and
 the ``bg_spectrum`` / ``reference`` spectra *are* recorded, but as provenance of
 the session that wrote the file, exposed on read as
-:attr:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep.source_metadata`.  They
+:attr:`~leman.loaders.ACSpectralSweep.source_metadata`.  They
 are **not** replayed: re-applying a correction because a file mentions one would
 make loading a decision, which is the one thing loading must not be.  Raw arrays
 in, corrections opt-in — the same rule as everywhere else in the package.
@@ -109,8 +109,8 @@ it twice.
 Functions
 ---------
 write_sweep
-    An :class:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep` or
-    :class:`~tmdc_optics_tools.loaders.AttoCubeTRPLSweep` -> ``.h5``.
+    An :class:`~leman.loaders.ACSpectralSweep` or
+    :class:`~leman.loaders.ACTRPLSweep` -> ``.h5``.
 read_sweep
     ``.h5`` -> the payload dict the loader builds from.  Called for you when a
     path with an HDF5 suffix is passed to the loader; use it directly only to
@@ -134,12 +134,15 @@ from . import __version__
 # reader that looks in the old place finds nothing there and drops a recorded
 # reference without erroring.  Hence the major gate on read — a silently missing
 # reference is worse than a refused file.
-FORMAT_NAME    = "tmdc_optics_tools.attocube_sweep"
+FORMAT_NAME    = "leman.attocube_sweep"
 FORMAT_VERSION = "2.3"
 _FORMAT_MAJOR  = FORMAT_VERSION.split(".")[0]
 
-# Files written before the module served both axis kinds carry the old name.
-_LEGACY_FORMAT_NAMES = ("tmdc_optics_tools.spectral_sweep",)
+# Files written under the old package name or the even older single-axis name.
+_LEGACY_FORMAT_NAMES = (
+    "tmdc_optics_tools.attocube_sweep",
+    "tmdc_optics_tools.spectral_sweep",
+)
 
 # How each loader's layout is stored: the axis dataset's name carries the physical
 # quantity, so `h5ls` alone says what kind of measurement a file holds.
@@ -152,8 +155,8 @@ _AXIS_KIND_FOR_LAYOUT = {
 
 # Which loader reads a stored axis kind back, for the error when they disagree.
 _CLASS_FOR_AXIS_KIND = {
-    "wavelength": "AttoCubeSpectralSweep",
-    "time":       "AttoCubeTRPLSweep",
+    "wavelength": "ACSpectralSweep",
+    "time":       "ACTRPLSweep",
 }
 
 # Keys stored as JSON strings because HDF5 attributes have no mapping type.
@@ -191,7 +194,7 @@ def _hdf5_key(label: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _write_geometry(parent: h5py.Group, geometry) -> None:
-    """Store a :class:`~tmdc_optics_tools.loaders.DeviceGeometry` under *parent*."""
+    """Store a :class:`~leman.loaders.DeviceGeometry` under *parent*."""
     grp = parent.create_group("geometry")
     for name in ("d_hbn_top", "d_hbn_bottom"):
         value = getattr(geometry, name)
@@ -209,7 +212,7 @@ def _write_geometry(parent: h5py.Group, geometry) -> None:
 
 
 def _read_geometry(grp: h5py.Group):
-    """Rebuild a :class:`~tmdc_optics_tools.loaders.DeviceGeometry` from *grp*."""
+    """Rebuild a :class:`~leman.loaders.DeviceGeometry` from *grp*."""
     from .loaders import DeviceGeometry, StackLayer
 
     def _thickness(name):
@@ -256,7 +259,7 @@ def write_sweep(
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep or AttoCubeTRPLSweep
+    scan : ACSpectralSweep or ACTRPLSweep
         The sweep to store.  Its axis kind decides the layout written.
     path : str or Path
         Destination file.  A missing parent directory is created.
@@ -499,7 +502,7 @@ def read_sweep(path) -> dict:
             raise ValueError(
                 f"'{path}' is not a {FORMAT_NAME} file (format={fmt!r}). "
                 f"Reference datasets in reference/data/ use a different layout "
-                f"and are read by tmdc_optics_tools.reference instead."
+                f"and are read by leman.reference instead."
             )
         # Refuse a major-version mismatch rather than read around it: the groups
         # this reader looks in are not where an older writer put them, so a

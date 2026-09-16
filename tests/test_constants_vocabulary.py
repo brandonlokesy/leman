@@ -25,7 +25,7 @@ because the signal is identical and only the x-axis differs. The argument is in
 
 import pytest
 
-from tmdc_optics_tools.constants import SIGNAL_LABELS, SPECTROSCOPY_TYPES
+from leman.constants import SIGNAL_LABELS, SPECTROSCOPY_TYPES
 
 
 def test_every_spectroscopy_type_has_a_signal_label():

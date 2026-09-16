@@ -1,6 +1,6 @@
 """
 Tests for reference-spectrum contrast: the pure maths in `processing` and the
-`bg_spectrum=` / `reference=` wiring on AttoCubeSpectralSweep.
+`bg_spectrum=` / `reference=` wiring on ACSpectralSweep.
 
 Synthetic throughout, except one end-to-end check against the committed
 reflectance pair.  The real sample sweep is 314 MB and takes ~20 s to parse, so it
@@ -12,8 +12,8 @@ import warnings
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import processing
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep, SingleSpectrum
+from leman import processing
+from leman.loaders import ACSpectralSweep, SingleSpectrum
 
 from test_loaders import N_PIXELS, N_SWEEPS, WAVELENGTH, make_spectral_csv, _roi1
 from _paths import DATA
@@ -144,7 +144,7 @@ def csv_and_ref(tmp_path):
 
 def test_no_reference_means_no_contrast(csv_and_ref):
     csv, _ = csv_and_ref
-    s = AttoCubeSpectralSweep(str(csv), spectra_type="R")
+    s = ACSpectralSweep(str(csv), spectra_type="R")
     assert s.contrast is None
     assert s.energy_contrast is None
     assert s.reference is None
@@ -152,7 +152,7 @@ def test_no_reference_means_no_contrast(csv_and_ref):
 
 def test_reference_from_path_builds_contrast(csv_and_ref):
     csv, ref = csv_and_ref
-    s = AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
+    s = ACSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
     expected = (s.spectra - s.reference[:, None]) / s.reference[:, None]
     assert np.allclose(s.contrast, expected)
     assert s.energy_contrast.shape == s.contrast.shape
@@ -160,7 +160,7 @@ def test_reference_from_path_builds_contrast(csv_and_ref):
 
 def test_reference_accepts_a_single_spectrum_object(csv_and_ref):
     csv, ref = csv_and_ref
-    s = AttoCubeSpectralSweep(str(csv), spectra_type="R",
+    s = ACSpectralSweep(str(csv), spectra_type="R",
                               reference=SingleSpectrum(str(ref)))
     assert s.contrast is not None
 
@@ -169,14 +169,14 @@ def test_reference_accepts_a_bare_array(csv_and_ref):
     # The escape hatch for a caller who has aligned the axes themselves.
     csv, _ = csv_and_ref
     values = np.full(N_PIXELS, 50.0)
-    s = AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=values)
+    s = ACSpectralSweep(str(csv), spectra_type="R", reference=values)
     assert np.allclose(s.reference, values)
 
 
 def test_bare_array_of_wrong_length_rejected(csv_and_ref):
     csv, _ = csv_and_ref
     with pytest.raises(ValueError, match="bare array"):
-        AttoCubeSpectralSweep(str(csv), spectra_type="R",
+        ACSpectralSweep(str(csv), spectra_type="R",
                               reference=np.ones(N_PIXELS + 1))
 
 
@@ -190,13 +190,13 @@ def test_reference_on_a_different_axis_raises_rather_than_resampling(tmp_path):
             ",".join("100.0" for _ in WAVELENGTH)]
     ref.write_text("\n".join(rows) + "\n")
     with pytest.raises(ValueError, match="not resampled automatically"):
-        AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
+        ACSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
 
 
 def test_reference_scale_biases_the_contrast_as_documented(csv_and_ref):
     csv, ref = csv_and_ref
-    plain  = AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
-    scaled = AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=str(ref),
+    plain  = ACSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
+    scaled = ACSpectralSweep(str(csv), spectra_type="R", reference=str(ref),
                                    reference_scale=2.0)
     # (S - kR)/(kR) is not a rescaling of (S - R)/R -- that is the whole point of
     # requiring a matched exposure.
@@ -207,7 +207,7 @@ def test_reference_scale_biases_the_contrast_as_documented(csv_and_ref):
 def test_bg_spectrum_subtracted_before_contrast(csv_and_ref):
     csv, ref = csv_and_ref
     bg = np.full(N_PIXELS, 10.0)
-    s = AttoCubeSpectralSweep(str(csv), spectra_type="R",
+    s = ACSpectralSweep(str(csv), spectra_type="R",
                               bg_spectrum=bg, reference=str(ref))
     corrected = s.spectra - bg[:, None]
     assert np.allclose(s.contrast,
@@ -217,7 +217,7 @@ def test_bg_spectrum_subtracted_before_contrast(csv_and_ref):
 def test_bg_spectrum_alone_populates_energy_spectra_bg(csv_and_ref):
     csv, _ = csv_and_ref
     bg = np.full(N_PIXELS, 3.0)
-    s = AttoCubeSpectralSweep(str(csv), spectra_type="PL", bg_spectrum=bg)
+    s = ACSpectralSweep(str(csv), spectra_type="PL", bg_spectrum=bg)
     assert s.energy_spectra_bg is not None
     assert s.best_energy_spectra is s.energy_spectra_bg
     # Raw arrays are never mutated after load.
@@ -229,9 +229,9 @@ def test_jacobian_never_applied_to_contrast(csv_and_ref):
     # No background here on purpose: this checks the ratio, and the missing-
     # background warning is asserted on in test_jacobian_background.
     csv, ref = csv_and_ref
-    off = AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=str(ref),
+    off = ACSpectralSweep(str(csv), spectra_type="R", reference=str(ref),
                                 apply_jacobian=False)
-    on  = AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=str(ref),
+    on  = ACSpectralSweep(str(csv), spectra_type="R", reference=str(ref),
                                 apply_jacobian=True)
     assert np.allclose(on.energy_contrast, off.energy_contrast)
     # ...while the ordinary energy spectra do respond to it.
@@ -240,14 +240,14 @@ def test_jacobian_never_applied_to_contrast(csv_and_ref):
 
 def test_best_energy_spectra_never_returns_the_contrast(csv_and_ref):
     csv, ref = csv_and_ref
-    s = AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
+    s = ACSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
     assert s.best_energy_spectra is s.energy_spectra
     assert not np.allclose(s.best_energy_spectra, s.energy_contrast)
 
 
 def test_spectra_type_not_mutated_by_supplying_a_reference(csv_and_ref):
     csv, ref = csv_and_ref
-    s = AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
+    s = ACSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
     assert s.spectra_type == "R"
     # The subject here is that spectra_type survives a reference=, not the
     # wording: a CCD records counts whichever beam produced them, so the raw
@@ -258,7 +258,7 @@ def test_spectra_type_not_mutated_by_supplying_a_reference(csv_and_ref):
 
 def test_contrast_label_follows_the_mode(csv_and_ref):
     csv, ref = csv_and_ref
-    s = AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=str(ref),
+    s = ACSpectralSweep(str(csv), spectra_type="R", reference=str(ref),
                               contrast="ratio")
     assert s.contrast_label == r"$R/R_0$"
     assert np.allclose(s.contrast,
@@ -266,13 +266,13 @@ def test_contrast_label_follows_the_mode(csv_and_ref):
 
 
 def test_contrast_reachable_through_the_plotting_registry(csv_and_ref):
-    from tmdc_optics_tools import plotting
+    from leman import plotting
     csv, ref = csv_and_ref
-    s = AttoCubeSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
+    s = ACSpectralSweep(str(csv), spectra_type="R", reference=str(ref))
     assert np.allclose(plotting._resolve_spectra(s, "contrast", "energy"),
                        s.energy_contrast)
     # And is unavailable, with a pointed message, when no reference was given.
-    plain = AttoCubeSpectralSweep(str(csv), spectra_type="R")
+    plain = ACSpectralSweep(str(csv), spectra_type="R")
     with pytest.raises(ValueError, match="reference="):
         plotting._resolve_spectra(plain, "contrast", "energy")
 

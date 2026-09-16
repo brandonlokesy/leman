@@ -12,7 +12,7 @@ carry the 1/e² laser-spot overlay. Two functions could draw an image, and neith
 the case:
 
 - `plot_image` accepts an `ax=`, so it composes into a grid, but had no annotation.
-- `_AttoCubeImage.show_image` annotates, but creates its own figure unconditionally, so
+- `_ACImg.show_image` annotates, but creates its own figure unconditionally, so
   it cannot draw into a caller's axes.
 
 Callers wanting both therefore reached into the private `plotting._draw_laser_circle`.
@@ -34,7 +34,7 @@ the package.
 
 ## Rejected
 
-**An `ax=` parameter on `_AttoCubeImage.show_image`.** The obvious fix, and the reason
+**An `ax=` parameter on `_ACImg.show_image`.** The obvious fix, and the reason
 this record exists. `show_image` is a convenience viewer: it owns its whole figure, so
 nothing composes on top of it and its internals cost nothing later. `ax=` converts it
 into a composable plotting function that happens to live in `loaders`, and

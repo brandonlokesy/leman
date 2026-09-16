@@ -11,7 +11,7 @@ position, which the row count alone cannot detect.
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.loaders import RamanMap
+from leman.loaders import RamanMap
 
 from _paths import DATA
 

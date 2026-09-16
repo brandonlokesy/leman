@@ -20,7 +20,7 @@ site/
 *.stackdump
 
 # Ignore /reference/data/.*h5
-src/tmdc_optics_tools/reference/data/*.h5
+src/leman/reference/data/*.h5
 
 # Exclude files. Reflectance file too big.
 examples/data/reflectance-contrast/sample_26_07_24_17_55_47_iter_0.csv

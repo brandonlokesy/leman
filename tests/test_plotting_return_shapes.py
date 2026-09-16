@@ -30,8 +30,8 @@ from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 
-from tmdc_optics_tools import plotting
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep
+from leman import plotting
+from leman.loaders import ACSpectralSweep
 
 from test_loaders import GATES, make_spectral_csv
 
@@ -40,7 +40,7 @@ from test_loaders import GATES, make_spectral_csv
 def scan(tmp_path):
     path = tmp_path / "sweep.csv"
     make_spectral_csv(path)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    return ACSpectralSweep(str(path), spectra_type="PL")
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def gated_scan(tmp_path):
     """A scan with the wiring declared, so ``plot_current`` has currents to draw."""
     path = tmp_path / "gated.csv"
     make_spectral_csv(path)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL", gates=GATES)
+    return ACSpectralSweep(str(path), spectra_type="PL", gates=GATES)
 
 
 @pytest.fixture

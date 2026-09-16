@@ -10,9 +10,9 @@ different about them, which is the whole reason they are separate:
 
 | Class | Axis | Export layout | Input |
 |---|---|---|---|
-| `AttoCubeSpectralSweep` | wavelength / energy | `[Par, Wavelength, ExpROI1, ExpROI2]`, named by a header | one `.csv` or `.h5` |
-| `BigTableSpectralSweep` | wavelength / energy | the same four fields with **no header**, and the signal written twice | one `.csv` |
-| `AttoCubeTRPLSweep` | time (ns) | `[Par, Wavelength, Exp]` — the "Wavelength" column holds **time** | one `.csv`, a **directory**, or `.h5` |
+| `ACSpectralSweep` | wavelength / energy | `[Par, Wavelength, ExpROI1, ExpROI2]`, named by a header | one `.csv` or `.h5` |
+| `BTSpectralSweep` | wavelength / energy | the same four fields with **no header**, and the signal written twice | one `.csv` |
+| `ACTRPLSweep` | time (ns) | `[Par, Wavelength, Exp]` — the "Wavelength" column holds **time** | one `.csv`, a **directory**, or `.h5` |
 
 The two spectral classes are siblings under a shared `_SpectralSweep`, so every
 correction, both axes and every accessor behave identically; what differs is the
@@ -27,4 +27,4 @@ TRPL sweep, and neither does `spectra`: handing one to a spectral plot raises
 rather than drawing time as if it were wavelength. Each class rejects the other's
 files by name.
 
-::: tmdc_optics_tools.loaders
+::: leman.loaders

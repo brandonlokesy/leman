@@ -7,7 +7,7 @@ object: TrimmedImageSequence, GridImageSequence, GridSweep.
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import plotting
+from leman import plotting
 
 
 class _FakeImageScan:

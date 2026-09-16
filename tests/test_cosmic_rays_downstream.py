@@ -21,9 +21,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import fitting, plotting
-from tmdc_optics_tools.loaders import (
-    AttoCubeSpectralSweep,
+from leman import fitting, plotting
+from leman.loaders import (
+    ACSpectralSweep,
     SingleSpectrum,
     _resolve_spectra,
 )
@@ -49,12 +49,12 @@ def csv_path(tmp_path):
 
 @pytest.fixture
 def repaired(csv_path):
-    return AttoCubeSpectralSweep(str(csv_path), spectra_type="PL", cosmic_rays={})
+    return ACSpectralSweep(str(csv_path), spectra_type="PL", cosmic_rays={})
 
 
 @pytest.fixture
 def untouched(csv_path):
-    return AttoCubeSpectralSweep(str(csv_path), spectra_type="PL")
+    return ACSpectralSweep(str(csv_path), spectra_type="PL")
 
 
 @pytest.fixture(autouse=True)

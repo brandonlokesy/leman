@@ -1,4 +1,4 @@
-# tmdc_optics_tools/fitting.py
+# leman/fitting.py
 """
 Common fitting routines for TMD spectroscopy.
 
@@ -880,7 +880,7 @@ def extract_fit_param_map(
 
     For a spatial map fit pixel-by-pixel — e.g. :func:`fit_raman_modes` run
     over every position of a
-    :class:`~tmdc_optics_tools.loaders.RamanMap` — not every pixel's fit
+    :class:`~leman.loaders.RamanMap` — not every pixel's fit
     necessarily has the requested mode at all (a monolayer pixel has no
     B₂g). A missing key is left ``NaN`` rather than raising, so
     :func:`plotting.plot_image` renders it as "not computed here", not
@@ -996,7 +996,7 @@ def fit_raman_modes(
     ----------
     shift, counts : array-like
         Raman shift (cm⁻¹) and counts, e.g. from a
-        :class:`~tmdc_optics_tools.loaders.RamanSpectrum`.
+        :class:`~leman.loaders.RamanSpectrum`.
     material : str
         Key into :data:`constants.RAMAN_MODES`, e.g. ``"WSe2"``.
     n_layers : int
@@ -1173,18 +1173,18 @@ def fit_scan_peak(
 ) -> list[FitResult]:
     """
     Fit a single peak in every sweep of an
-    :class:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep`.
+    :class:`~leman.loaders.ACSpectralSweep`.
 
     Corrections are configured at load time on the scan object (via
     ``bg_region_nm`` / ``bg_region_eV``, ``apply_jacobian`` and ``cosmic_rays``).
     This function fits the most-corrected array the scan has for *x_axis* —
-    :attr:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep.best_energy_spectra`
-    or :attr:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep.best_spectra` — so
+    :attr:`~leman.loaders.ACSpectralSweep.best_energy_spectra`
+    or :attr:`~leman.loaders.ACSpectralSweep.best_spectra` — so
     a declared background or cosmic-ray repair reaches the fit on either axis.
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep
+    scan : ACSpectralSweep
     x_axis : {"energy", "wavelength"}
     x_range : tuple of (x_min, x_max), optional
         Restrict the fit to this spectral window. Units match *x_axis*. Bounds
@@ -1349,7 +1349,7 @@ class SparseLifetimeResult:
     ----------
     t : np.ndarray
         Time axis used for the fit, in the same units as *tau_grid*
-        (nanoseconds for :class:`~tmdc_optics_tools.loaders.AttoCubeTRPLSweep`
+        (nanoseconds for :class:`~leman.loaders.ACTRPLSweep`
         data), relative to whatever the caller chose as t=0.
     y : np.ndarray
         Data fitted, in whatever normalization the caller passed in.
@@ -1419,7 +1419,7 @@ def build_irf_kernel(
     ----------
     time, counts : np.ndarray
         Measured instrument-response decay, e.g. an
-        :class:`~tmdc_optics_tools.loaders.AttoCubeTRPLSweep`'s ``time`` and
+        :class:`~leman.loaders.ACTRPLSweep`'s ``time`` and
         ``best_decays[:, 0]`` loaded from a dedicated IRF file.
     dt : float
         Target sample spacing, in the same units as *time*.
@@ -1542,7 +1542,7 @@ def fit_sparse_lifetime(
         what makes "before" vs. "after" the excitation meaningful.
     y : np.ndarray
         Counts to fit. Not normalized internally — normalize beforehand
-        (e.g. with :func:`~tmdc_optics_tools.processing.normalise_minmax`,
+        (e.g. with :func:`~leman.processing.normalise_minmax`,
         as :func:`fit_scan_lifetime` does) if *alpha* and the resulting
         amplitudes are meant to be compared across traces with different
         absolute intensities.
@@ -1587,7 +1587,7 @@ def fit_sparse_lifetime(
 
     # Imported here, not at module level: scikit-learn is a heavy import and
     # this is the only function in the package that needs it, so `import
-    # tmdc_optics_tools` should not pay for it.
+    # leman` should not pay for it.
     from sklearn.linear_model import Lasso
 
     X = _build_lifetime_dictionary(t, tau_grid, irf_kernel)
@@ -1620,11 +1620,11 @@ def fit_scan_lifetime(
 ) -> list[SparseLifetimeResult]:
     """
     Fit a sparse lifetime distribution to every sweep of an
-    :class:`~tmdc_optics_tools.loaders.AttoCubeTRPLSweep`.
+    :class:`~leman.loaders.ACTRPLSweep`.
 
     Each sweep's decay is windowed to *t_range* relative to *t0* and
     normalized to its own ``[0, 1]`` range
-    (:func:`~tmdc_optics_tools.processing.normalise_minmax`) before being
+    (:func:`~leman.processing.normalise_minmax`) before being
     passed to :func:`fit_sparse_lifetime`, so *alpha* means the same thing
     across sweeps regardless of absolute count rate or a residual baseline
     within the window. This is the same function whether *scan* came from a
@@ -1633,7 +1633,7 @@ def fit_scan_lifetime(
 
     Parameters
     ----------
-    scan : AttoCubeTRPLSweep
+    scan : ACTRPLSweep
     t0 : float
         Pulse arrival time, in the same units as ``scan.time`` (ns) — e.g.
         the IRF's own peak time.
@@ -1991,14 +1991,14 @@ def extract_dipole_length(
         Background subtraction and cosmic-ray repair are configured at load time
         on the scan object, via ``bg_region_nm`` / ``bg_region_eV`` and
         ``cosmic_rays``.  The per-point fits run on
-        :attr:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep.best_energy_spectra`,
+        :attr:`~leman.loaders.ACSpectralSweep.best_energy_spectra`,
         which is the most-corrected energy-axis array available.
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep
+    scan : ACSpectralSweep
         Must have ``ef`` set (requires a
-        :class:`~tmdc_optics_tools.loaders.DeviceGeometry`).
+        :class:`~leman.loaders.DeviceGeometry`).
     x_range : tuple of (E_min, E_max) in eV, optional
         Spectral window for the lineshape fit. Strongly recommended to
         zoom in on the exciton of interest.
@@ -2189,7 +2189,7 @@ def track_peak_energies(
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep or BigTableSpectralSweep
+    scan : ACSpectralSweep or BTSpectralSweep
         Any sweep object with ``best_energy_spectra`` (shape
         ``(n_pixels, n_sweeps)``), ``energy`` (shape ``(n_pixels,)``),
         and the sweep-axis properties ``sweep_axis``, ``sweep_label``,
@@ -2231,7 +2231,7 @@ def track_peak_energies(
         if not hasattr(scan, attr):
             raise ValueError(
                 f"scan has no {attr!r} attribute. Expected an "
-                f"AttoCubeSpectralSweep, BigTableSpectralSweep, or similar."
+                f"ACSpectralSweep, BTSpectralSweep, or similar."
             )
 
     sweep_values = scan.sweep_axis
@@ -2659,8 +2659,8 @@ def extract_dipole_lengths(
     Parameters
     ----------
     source : scan or PeakTrack
-        Either a sweep object (``AttoCubeSpectralSweep``,
-        ``BigTableSpectralSweep``, or similar) or an already-computed
+        Either a sweep object (``ACSpectralSweep``,
+        ``BTSpectralSweep``, or similar) or an already-computed
         :class:`PeakTrack`.  When a scan is passed, *x_range* and
         *track_method* are forwarded to :func:`track_peak_energies`;
         when a ``PeakTrack`` is passed they are ignored.
@@ -3220,7 +3220,7 @@ def track_multi_peak_energies(
 
     Parameters
     ----------
-    scan : AttoCubeSpectralSweep or BigTableSpectralSweep
+    scan : ACSpectralSweep or BTSpectralSweep
         Any sweep object with ``best_energy_spectra``, ``energy``, and
         the sweep-axis properties.
     seeds : list of float, optional
@@ -3281,7 +3281,7 @@ def track_multi_peak_energies(
         if not hasattr(scan, attr):
             raise ValueError(
                 f"scan has no {attr!r} attribute. Expected an "
-                f"AttoCubeSpectralSweep, BigTableSpectralSweep, or similar."
+                f"ACSpectralSweep, BTSpectralSweep, or similar."
             )
 
     spectra = scan.best_energy_spectra

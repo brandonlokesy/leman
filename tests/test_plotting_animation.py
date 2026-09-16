@@ -26,8 +26,8 @@ from matplotlib.animation import HTMLWriter, PillowWriter
 from matplotlib.text import Text
 from PIL import Image
 
-from tmdc_optics_tools import plotting, processing
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep
+from leman import plotting, processing
+from leman.loaders import ACSpectralSweep
 
 from test_loaders import make_spectral_csv
 from test_loaders_nesting import RASTER
@@ -453,14 +453,14 @@ def sweep(tmp_path):
     """Sweep points 0, 1, 2 at Scanner Y = 7.0, 7.5, 8.0 V."""
     path = tmp_path / "flat.csv"
     make_spectral_csv(path)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL", sweep="piezo_y")
+    return ACSpectralSweep(str(path), spectra_type="PL", sweep="piezo_y")
 
 
 @pytest.fixture
 def nested_sweep(tmp_path):
     path = tmp_path / "raster.csv"
     make_spectral_csv(path, params=RASTER)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    return ACSpectralSweep(str(path), spectra_type="PL",
                                  fast_sweep="piezo_x", slow_sweep="piezo_y")
 
 
@@ -662,7 +662,7 @@ def test_the_conjugate_axis_clears_the_shared_title():
 # PL frame to pair with. animate_panels cannot fix this — it sees a row of
 # ImageSequencePanels and cannot tell which is the white light — so the rule lives in
 # animate_wl_pl_spectra, where the argument is named `wl`. These tests build real
-# directories because AttoCubePLScanRealSpace is type-checked, not duck-typed.
+# directories because ACImgSweep is type-checked, not duck-typed.
 
 
 def _image_dir(root, prefix, n_frames):

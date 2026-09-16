@@ -1,4 +1,4 @@
-# src/tmdc_optics_tools/reference/loader.py
+# src/leman/reference/loader.py
 
 import h5py
 import numpy as np
@@ -281,7 +281,7 @@ def load_reference(material: str, source: str) -> ReferenceDataset:
         raise FileNotFoundError(
             f"No data found for {material!r} / {source!r}.\n"
             f"Expected: {path}\n"
-            f"Run `python -m tmdc_optics_tools.reference.registry` to download and process."
+            f"Run `python -m leman.reference.registry` to download and process."
         )
 
     with h5py.File(path, "r") as hf:

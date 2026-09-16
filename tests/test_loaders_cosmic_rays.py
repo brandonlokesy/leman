@@ -1,5 +1,5 @@
 """
-Tests for the ``cosmic_rays=`` declaration on AttoCubeSpectralSweep.
+Tests for the ``cosmic_rays=`` declaration on ACSpectralSweep.
 
 Detection itself is covered by ``test_processing_cosmic_rays``; what is pinned
 here is the loader's side of it:
@@ -20,8 +20,8 @@ against, which the builder's default index ramp does not have.
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.constants import HC_EV_NM
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep
+from leman.constants import HC_EV_NM
+from leman.loaders import ACSpectralSweep
 
 from test_loaders import N_SWEEPS, make_spectral_csv
 
@@ -65,8 +65,8 @@ def csv_path(tmp_path, spiked):
     return path
 
 
-def _load(csv_path, **kwargs) -> AttoCubeSpectralSweep:
-    return AttoCubeSpectralSweep(csv_path, spectra_type="PL", **kwargs)
+def _load(csv_path, **kwargs) -> ACSpectralSweep:
+    return ACSpectralSweep(csv_path, spectra_type="PL", **kwargs)
 
 
 def _ascending_energy(spectra) -> np.ndarray:
@@ -181,7 +181,7 @@ def test_contrast_is_formed_from_the_repair(tmp_path, spiked):
         + ",".join(f"{v}" for v in np.full(N_PIX, 500.0)) + "\n"
     )
 
-    scan = AttoCubeSpectralSweep(
+    scan = ACSpectralSweep(
         scan_path, spectra_type="R", reference=ref_path, cosmic_rays={},
     )
 
@@ -211,7 +211,7 @@ def test_declaration_is_checked_before_the_file_is_read(tmp_path):
     """A typo is reported without paying for the decode of a large export."""
     missing = tmp_path / "not-written.csv"
     with pytest.raises(ValueError, match="unknown key"):
-        AttoCubeSpectralSweep(missing, spectra_type="PL",
+        ACSpectralSweep(missing, spectra_type="PL",
                               cosmic_rays={"sigma": 4.0})
 
 
@@ -230,7 +230,7 @@ def test_hdf5_records_the_declaration_without_replaying_it(tmp_path, csv_path):
     h5 = tmp_path / "scan.h5"
     scan.to_hdf5(h5)
 
-    reloaded = AttoCubeSpectralSweep(h5)
+    reloaded = ACSpectralSweep(h5)
 
     assert reloaded.source_metadata["cosmic_rays"] == {"sigma_threshold": 4.0}
     assert reloaded.cosmic_rays is None

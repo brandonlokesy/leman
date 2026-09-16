@@ -10,7 +10,7 @@ for purely instrumental reasons.
 * **Ordering** — background comes off in wavelength space *first*, for both
   background mechanisms.
 * **The warning** — both classes exposing ``apply_jacobian``
-  (AttoCubeSpectralSweep, SingleSpectrum) say so at load time when no background
+  (ACSpectralSweep, SingleSpectrum) say so at load time when no background
   was supplied.
 
 Synthetic fixtures throughout, reusing the spectral CSV builder from
@@ -22,9 +22,9 @@ import warnings
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import processing
-from tmdc_optics_tools.constants import HC_EV_NM
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep, SingleSpectrum
+from leman import processing
+from leman.constants import HC_EV_NM
+from leman.loaders import ACSpectralSweep, SingleSpectrum
 
 from test_loaders import N_PIXELS, WAVELENGTH, make_spectral_csv
 
@@ -73,7 +73,7 @@ def test_bg_spectrum_is_subtracted_before_the_jacobian(csv_path):
     # A flat pedestal B: subtracting first gives J·(S − B), subtracting after
     # gives J·S − B, and the two differ by B·(λ²/hc − 1) — a curve, not an offset.
     pedestal = 7.0
-    scan = AttoCubeSpectralSweep(
+    scan = ACSpectralSweep(
         str(csv_path), spectra_type="PL", apply_jacobian=True,
         bg_spectrum=np.full(N_PIXELS, pedestal),
     )
@@ -98,7 +98,7 @@ def test_bg_region_is_subtracted_before_the_jacobian(csv_path):
     # Same ordering for the window-mean mechanism.  subtract_background is reused
     # rather than reimplemented, so this pins the order and not its estimator.
     window = (806.0, 809.0)
-    scan = AttoCubeSpectralSweep(
+    scan = ACSpectralSweep(
         str(csv_path), spectra_type="PL", apply_jacobian=True,
         bg_region_nm=window,
     )
@@ -126,7 +126,7 @@ def test_bg_region_is_subtracted_before_the_jacobian(csv_path):
 def test_pre_jacobian_array_carries_no_background(csv_path):
     # energy_spectra_pre_jacobian is the uncorrected array the warning points at,
     # so it must track spectra rather than the background-subtracted version.
-    scan = AttoCubeSpectralSweep(
+    scan = ACSpectralSweep(
         str(csv_path), spectra_type="PL", apply_jacobian=True,
         bg_region_nm=(806.0, 809.0),
     )
@@ -137,20 +137,20 @@ def test_pre_jacobian_array_carries_no_background(csv_path):
 
 
 # ---------------------------------------------------------------------------
-# AttoCubeSpectralSweep — the missing-background warning
+# ACSpectralSweep — the missing-background warning
 # ---------------------------------------------------------------------------
 
 
 def test_jacobian_without_background_warns(csv_path):
     with pytest.warns(UserWarning, match=MATCH):
-        AttoCubeSpectralSweep(str(csv_path), spectra_type="PL",
+        ACSpectralSweep(str(csv_path), spectra_type="PL",
                               apply_jacobian=True)
 
 
 def test_warning_names_the_arguments_that_satisfy_it(csv_path):
     # A warning a researcher cannot act on gets ignored, so the fix must be in it.
     with pytest.warns(UserWarning, match=MATCH) as record:
-        AttoCubeSpectralSweep(str(csv_path), spectra_type="PL",
+        ACSpectralSweep(str(csv_path), spectra_type="PL",
                               apply_jacobian=True)
     message = str(_jacobian_warnings(record)[0].message)
     assert "bg_region_nm" in message
@@ -161,7 +161,7 @@ def test_warning_names_the_arguments_that_satisfy_it(csv_path):
 def test_bg_region_nm_silences_it(csv_path):
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
-        AttoCubeSpectralSweep(str(csv_path), spectra_type="PL",
+        ACSpectralSweep(str(csv_path), spectra_type="PL",
                               apply_jacobian=True, bg_region_nm=(806.0, 809.0))
     assert _jacobian_warnings(record) == []
 
@@ -170,7 +170,7 @@ def test_bg_region_eV_silences_it(csv_path):
     # Resolved to nm before the check, so the eV entry point is covered too.
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
-        AttoCubeSpectralSweep(str(csv_path), spectra_type="PL",
+        ACSpectralSweep(str(csv_path), spectra_type="PL",
                               apply_jacobian=True, bg_region_eV=(1.53, 1.54))
     assert _jacobian_warnings(record) == []
 
@@ -179,7 +179,7 @@ def test_bg_spectrum_silences_it(csv_path, bg_path):
     # A measured dark frame removes the pedestal just as a window mean does.
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
-        AttoCubeSpectralSweep(str(csv_path), spectra_type="PL",
+        ACSpectralSweep(str(csv_path), spectra_type="PL",
                               apply_jacobian=True, bg_spectrum=str(bg_path))
     assert _jacobian_warnings(record) == []
 
@@ -187,7 +187,7 @@ def test_bg_spectrum_silences_it(csv_path, bg_path):
 def test_no_warning_without_the_jacobian(csv_path):
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
-        AttoCubeSpectralSweep(str(csv_path), spectra_type="PL")
+        ACSpectralSweep(str(csv_path), spectra_type="PL")
     assert _jacobian_warnings(record) == []
 
 
@@ -197,13 +197,13 @@ def test_reference_alone_does_not_silence_it(csv_path, tmp_path):
     reference = tmp_path / "bare.csv"
     _write_two_row_csv(reference, np.full(WAVELENGTH.size, 50.0))
     with pytest.warns(UserWarning, match=MATCH):
-        AttoCubeSpectralSweep(str(csv_path), spectra_type="RC",
+        ACSpectralSweep(str(csv_path), spectra_type="RC",
                               apply_jacobian=True, reference=str(reference))
 
 
 def test_warning_points_at_the_uncorrected_array(csv_path):
     with pytest.warns(UserWarning, match=MATCH) as record:
-        scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL",
+        scan = ACSpectralSweep(str(csv_path), spectra_type="PL",
                                      apply_jacobian=True)
     assert "energy_spectra_pre_jacobian" in str(_jacobian_warnings(record)[0].message)
     # And it exists, uncorrected, as the message claims.
@@ -246,6 +246,6 @@ def test_aux_spectrum_load_does_not_warn(csv_path, bg_path):
     # construction must not emit the warning on the caller's behalf.
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
-        AttoCubeSpectralSweep(str(csv_path), spectra_type="PL",
+        ACSpectralSweep(str(csv_path), spectra_type="PL",
                               bg_spectrum=str(bg_path))
     assert _jacobian_warnings(record) == []

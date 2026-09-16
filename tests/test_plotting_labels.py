@@ -17,9 +17,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import plotting
-from tmdc_optics_tools.constants import SIGNAL_LABELS
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep, SingleSpectrum
+from leman import plotting
+from leman.constants import SIGNAL_LABELS
+from leman.loaders import ACSpectralSweep, SingleSpectrum
 
 from test_loaders import WAVELENGTH, make_spectral_csv
 from test_contrast import _write_reference
@@ -42,7 +42,7 @@ def csv_path(tmp_path):
 
 
 def _scan(csv_path, spectra_type="PL"):
-    return AttoCubeSpectralSweep(str(csv_path), spectra_type=spectra_type)
+    return ACSpectralSweep(str(csv_path), spectra_type=spectra_type)
 
 
 @pytest.fixture
@@ -50,7 +50,7 @@ def contrast_scan(tmp_path, csv_path):
     """A reflectance scan with a reference, so the contrast sources resolve."""
     ref = tmp_path / "reference.csv"
     _write_reference(ref, np.full(len(WAVELENGTH), 50.0))
-    return AttoCubeSpectralSweep(str(csv_path), spectra_type="R",
+    return ACSpectralSweep(str(csv_path), spectra_type="R",
                                  reference=str(ref))
 
 

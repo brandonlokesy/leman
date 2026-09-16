@@ -272,8 +272,8 @@ Four things to know:
 Overriding, per instance:
 
 ```python
-scan = AttoCubeSpectralSweep(..., curated_labels={"scanner_x": "Galvo_X"})  # which row
-scan = AttoCubeSpectralSweep(..., curated_scales={"scanner_x": 12.5},       # µm per V
+scan = ACSpectralSweep(..., curated_labels={"scanner_x": "Galvo_X"})  # which row
+scan = ACSpectralSweep(..., curated_scales={"scanner_x": 12.5},       # µm per V
                                   curated_units ={"scanner_x": "µm"})       # …now in µm
 ```
 
@@ -602,10 +602,10 @@ would assert a false `n_layers`.
 
 ---
 
-# 5. Life of a load — `AttoCubeSpectralSweep`, start to finish
+# 5. Life of a load — `ACSpectralSweep`, start to finish
 
 ```python
-scan = AttoCubeSpectralSweep(
+scan = ACSpectralSweep(
     "PL-dual-gate-sweep_iter_0.csv",
     spectra_type = "PL",
     sweep        = "electric_field",
@@ -640,7 +640,7 @@ _CURATED      = ...         # its rows
 _HDF5_SIGNALS = ...         # which arrays an archive of it carries
 ```
 
-`AttoCubeTRPLSweep` is a sibling of `_SpectralSweep`, not a child: it sets the
+`ACTRPLSweep` is a sibling of `_SpectralSweep`, not a child: it sets the
 first three to `"time"`, `"decays"`, `"time bins"` on itself, and has no energy
 axis and no correction ladder. Those strings are the *entire* difference `_Sweep`
 sees — `n_sweeps` is `getattr(self, self._SIGNAL_ATTR).shape[1]`, and
@@ -648,7 +648,7 @@ everything else follows.
 
 **`_SpectralSweep` deliberately has no `__init__`.** See the next paragraph: the
 order of construction is load-bearing, so each loader writes the sequence out.
-A second reason is mechanical — `AttoCubeSpectralSweep.__init__` carries no
+A second reason is mechanical — `ACSpectralSweep.__init__` carries no
 docstring of its own, so mkdocstrings renders its *signature* above the class
 docstring's parameter table; an inherited `__init__` would print a signature
 without `roi=` above a table that documents `roi`.
@@ -915,7 +915,7 @@ The nest itself is declared at load with `fast_sweep=` / `slow_sweep=`, inner ax
 first *by name* rather than by tuple position:
 
 ```python
-scan = AttoCubeSpectralSweep(path, spectra_type="RC",
+scan = ACSpectralSweep(path, spectra_type="RC",
                              fast_sweep="Scanner X", slow_sweep="Scanner Y")
 scan.nesting          # SweepNesting: both coordinate axes, labels, units
 scan.is_nested        # the predicate as_grid() and the accessors need
@@ -1049,19 +1049,19 @@ has aligned the axes themselves has a route in, with no extra API.
 
 | Class | Reads | Notes |
 |---|---|---|
-| `AttoCubeSpectralSweep` | one spectral CSV, or an `.h5` | the main one |
-| `AttoCubeTRPLSweep` | a **directory** of temporal CSVs, or an `.h5` | separate class, no `spectra` attribute |
-| `AttoCubePLVabScan` | — | compatibility shim over the above; raises `FutureWarning` |
-| `BigTableSpectralSweep` | one **headerless** spectral CSV | a sibling, not a subclass; see below |
+| `ACSpectralSweep` | one spectral CSV, or an `.h5` | the main one |
+| `ACTRPLSweep` | a **directory** of temporal CSVs, or an `.h5` | separate class, no `spectra` attribute |
+| `ACPLVabScan` | — | compatibility shim over the above; raises `FutureWarning` |
+| `BTSpectralSweep` | one **headerless** spectral CSV | a sibling, not a subclass; see below |
 | `SingleSpectrum` | a 2-row CSV (row 0 = λ/nm, row 1 = counts) | mirrors the sweep's attribute names so plotting works unchanged |
-| `AttoCubePLScanRealSpace` | a directory of numeric-grid CSVs | image sequence for diffusion work |
-| `SingleImage`, `AttoCubeSampleImage`, `AttoCubePLImage` | one numeric-grid CSV | share `_AttoCubeImage`; only `AttoCubePLImage` takes `bg_region=` — see below |
-| `AttoCubeLaserReferenceImage` | one numeric-grid CSV | fits the laser spot centre and 1/e² radius on construction |
+| `ACImgSweep` | a directory of numeric-grid CSVs | image sequence for diffusion work |
+| `SingleImage`, `ACSampleImg`, `ACImg` | one numeric-grid CSV | share `_ACImg`; only `ACImg` takes `bg_region=` — see below |
+| `ACLaserRefImg` | one numeric-grid CSV | fits the laser spot centre and 1/e² radius on construction |
 
-## `BigTableSpectralSweep` — what a second instrument costs
+## `BTSpectralSweep` — what a second instrument costs
 
 The useful thing about this class is how little of it there is. It shares
-`_SpectralSweep` with `AttoCubeSpectralSweep`, so the correction ladder, both
+`_SpectralSweep` with `ACSpectralSweep`, so the correction ladder, both
 axes, `pixel_slice` and the two spectrum accessors are inherited untouched. What
 it defines is a decoder, a `_CURATED`, a `_SIBLING_CURRENT`, a
 `_validate_payload` and an `__init__` — which is exactly the list decision
@@ -1084,9 +1084,9 @@ Three things about the export shape the class, and all three are recorded in
 
 `to_hdf5` refuses, in both directions. `hdf5._AXIS_KIND_FOR_LAYOUT` records which
 axis a file holds but nothing records which instrument wrote it, so a saved sweep
-would read back as an `AttoCubeSpectralSweep`.
+would read back as an `ACSpectralSweep`.
 
-## `AttoCubeTRPLSweep` — why a directory
+## `ACTRPLSweep` — why a directory
 
 A TRPL sweep arrives as **one file per sweep point**, each carrying its own full
 57-row parameter snapshot, plus a **metadata companion**: a *spectral*-layout file
@@ -1100,7 +1100,7 @@ Two consequences the assembly code exists for:
   header line per file and sorts them.
 - **Order by the integer in `_iter_N`**, via `_order_by_iter`. Lexicographic order
   puts `iter_10` before `iter_2`. The helper is module-level and shared with
-  `AttoCubePLScanRealSpace`, which has the same problem over image frames; it takes a
+  `ACImgSweep`, which has the same problem over image frames; it takes a
   plain `list[Path]`, so this call site re-attaches each file's layout by dict lookup
   after the sort. It warns on a missing suffix, a gap, and an index claimed by more
   than one file, and repairs none of them.
@@ -1108,7 +1108,7 @@ Two consequences the assembly code exists for:
 The per-file time axes are not bit-identical (bin width varies in its seventh
 figure), so `_assemble` compares them with `time_rtol`, never for equality.
 
-It is a **separate class rather than a mode of `AttoCubeSpectralSweep`**, and has no
+It is a **separate class rather than a mode of `ACSpectralSweep`**, and has no
 `spectra` attribute — the signal is `decays`, the axis is `time`, and there are no
 ROIs. Everything it shares lives in `_Sweep`, which is why it is a sibling of
 `_SpectralSweep` rather than a child of it.
@@ -1119,19 +1119,19 @@ fitted lifetime inherits it, and it is consistent with the Picoharp rows and a
 
 ## Which images take a background region
 
-`bg_region=` / `bg_stat=` live on `_AttoCubeImage` because that is where `img` is built,
+`bg_region=` / `bg_stat=` live on `_ACImg` because that is where `img` is built,
 not because every image kind wants a pedestal removed. One of the four subclasses accepts
 them; the other three refuse, by taking a **narrower `__init__`**:
 
 | Class | `bg_region=` | Why |
 |---|---|---|
-| `AttoCubePLImage` | accepted | the corner is dark, and numbers are computed from the frame — `analyse_diffusion_cloud` thresholds it and takes areas and second moments, so a pedestal biases the cloud area |
-| `AttoCubeSampleImage` | refused | a white-light frame's corner is substrate, which reflects; the correction it wants is a ratio against a reference frame, not a constant |
+| `ACImg` | accepted | the corner is dark, and numbers are computed from the frame — `analyse_diffusion_cloud` thresholds it and takes areas and second moments, so a pedestal biases the cloud area |
+| `ACSampleImg` | refused | a white-light frame's corner is substrate, which reflects; the correction it wants is a ratio against a reference frame, not a constant |
 | `SingleImage` | refused | takes `path` only |
-| `AttoCubeLaserReferenceImage` | refused | removes its background with a **white top-hat** in `_preprocess`, an estimator shaped like the structured white-light background it faces |
+| `ACLaserRefImg` | refused | removes its background with a **white top-hat** in `_preprocess`, an estimator shaped like the structured white-light background it faces |
 
-`AttoCubePLScanRealSpace` is not one of these — it is a sequence loader, not an
-`_AttoCubeImage` — but it takes the same two arguments for the same reason, and keeps the
+`ACImgSweep` is not one of these — it is a sequence loader, not an
+`_ACImg` — but it takes the same two arguments for the same reason, and keeps the
 corrected frames in `load_frame_bg` so `load_frame` stays the file's own counts.
 
 The attribute exists on every one of them regardless — the base assigns it — and is
@@ -1202,8 +1202,8 @@ scan/raw/sweep.csv            ──►  scan/converted/sweep.h5
 trpl/  (a directory of decays) ─►  converted/trpl.h5
 ```
 
-The HDF5 side owns no format of its own. It loads with `AttoCubeSpectralSweep` or
-`AttoCubeTRPLSweep` and writes with `hdf5.write_sweep`, so a converted sweep reopens
+The HDF5 side owns no format of its own. It loads with `ACSpectralSweep` or
+`ACTRPLSweep` and writes with `hdf5.write_sweep`, so a converted sweep reopens
 by handing the `.h5` back to its loader. Measured on committed data: 4.59 MB →
 0.142 MB for the `stark-shift` spectral sweep, and 11.57 MB → 0.070 MB for
 `examples/data/TRPL` — the bulk of that being the 11.14 MB parameter-table
@@ -1226,7 +1226,7 @@ All three read `argument if argument is not None else meta.get(...)`, and every
 parameter row is stored verbatim, so an archive is declared against exactly as the
 CSV was. An archive written with `--spectra-type PL` alone comes back with
 `sweep_type == "index"`, and `sweep="V_A", gates=…, geometry=…` at read time work
-on it unchanged. `AttoCubeTRPLSweep` needs no flag at all — it defaults the type to
+on it unchanged. `ACTRPLSweep` needs no flag at all — it defaults the type to
 `"TRPL"`, the class name having already declared the modality.
 
 ## A TRPL directory converts only when named
@@ -1290,8 +1290,8 @@ Two questions the converter could have answered on its own, and does not:
 |---|---|---|
 | Is this CSV a frame? | `loaders._classify_csv` | A two-row spectrum is numeric on its first line exactly like an image. Deciding again is how **A9** happened the first time. |
 | What order do frames go in? | `loaders._order_by_iter` | Filename order puts `iter_10` before `iter_2`, and export padding widths vary. Deciding again is **A7**. |
-| Which files are one TRPL sweep? | `AttoCubeTRPLSweep._decode_dir` | IRF exclusion is by name and the companion by position; both are facts about the export, not about conversion. |
-| Is this `spectra_type` valid? | `AttoCubeSpectralSweep._resolve_spectra_type` | Called with empty metadata before the decode, so a mistyped type raises the loader's own message with no second copy of the wording. |
+| Which files are one TRPL sweep? | `ACTRPLSweep._decode_dir` | IRF exclusion is by name and the companion by position; both are facts about the export, not about conversion. |
+| Is this `spectra_type` valid? | `ACSpectralSweep._resolve_spectra_type` | Called with empty metadata before the decode, so a mistyped type raises the loader's own message with no second copy of the wording. |
 | What layout does an archive have? | `hdf5.write_sweep` | One archive format in the package. The `dev/hdf5` branch's second layout could not be reopened by the loader. |
 
 Ordering is applied only where it changes the output. A stack's page order is its
@@ -1349,7 +1349,7 @@ spectral_contrast                    remove_cosmic_rays
 
 `_window_slice` turns a `(lo, hi)` window on a measured axis into a `slice`, so the
 axis and the signal are cut by one object and both stay views. It is what
-`AttoCubeSpectralSweep.pixel_slice` and `fitting.fit_scan_peak` are both built on, and
+`ACSpectralSweep.pixel_slice` and `fitting.fit_scan_peak` are both built on, and
 it refuses an empty window and warns on a clipped bound — which is why it sits next to
 `crop`, the remaining spelling of the same window that does neither. (The third is
 `plot_power_series`'s inline mask.) Unifying `crop` on it would make it raise where it

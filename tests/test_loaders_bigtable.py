@@ -1,4 +1,4 @@
-"""`BigTableSpectralSweep` — the headerless export, and what it refuses.
+"""`BTSpectralSweep` — the headerless export, and what it refuses.
 
 Two kinds of fixture, with a division of labour worth stating.
 
@@ -21,7 +21,7 @@ bare `pytest.raises(ValueError)` is also satisfied by pandas failing on a ragged
 row, which is how an unreachable refusal once passed for months (A29).
 
 `stacklevel` is measured here, not read off the `def` lines. The chain runs
-caller → `__init__` → `_decode_and_describe` → `BigTableSpectralSweep._decode`
+caller → `__init__` → `_decode_and_describe` → `BTSpectralSweep._decode`
 → `_Sweep._decode` → `_decode_csv` → the warning, and the easy frame to miss is
 this class's own `_decode` override.
 """
@@ -32,9 +32,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.loaders import (
-    AttoCubeSpectralSweep,
-    BigTableSpectralSweep,
+from leman.loaders import (
+    ACSpectralSweep,
+    BTSpectralSweep,
     DeviceGeometry,
 )
 
@@ -56,7 +56,7 @@ GEOM = DeviceGeometry.from_single("WSe2", d_hbn_top=30, d_hbn_bottom=26)
 
 @pytest.fixture
 def ez():
-    return BigTableSpectralSweep(EZ, spectra_type="PL", gates=GATES)
+    return BTSpectralSweep(EZ, spectra_type="PL", gates=GATES)
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ def ez():
 
 @pytest.mark.parametrize("path, n_sweeps", [(DOPING, 61), (EZ, 101)])
 def test_shape_and_range(path, n_sweeps):
-    scan = BigTableSpectralSweep(path, spectra_type="PL")
+    scan = BTSpectralSweep(path, spectra_type="PL")
     assert scan.spectra.shape == (N_PIXELS, n_sweeps)
     assert scan.n_pixels == N_PIXELS
     assert scan.n_sweeps == n_sweeps
@@ -79,7 +79,7 @@ def test_shape_and_range(path, n_sweeps):
 def test_the_positional_row_map_against_rows_read_by_hand():
     # Read out of the file with awk, not with this parser. 1-based row numbers,
     # as the acquisition program and dev/instruments/big-table.md count them.
-    scan = BigTableSpectralSweep(EZ, spectra_type="PL")
+    scan = BTSpectralSweep(EZ, spectra_type="PL")
     p = scan.parameters
     assert p["X Position"][0] == pytest.approx(59.0)      # row 1
     assert p["Y Position"][0] == pytest.approx(108.0)     # row 2
@@ -94,7 +94,7 @@ def test_the_positional_row_map_against_rows_read_by_hand():
 
 
 def test_unidentified_rows_keep_a_positional_name():
-    scan = BigTableSpectralSweep(EZ, spectra_type="PL")
+    scan = BTSpectralSweep(EZ, spectra_type="PL")
     # Exactly the block this loader exposes, no more and no less.
     assert len(scan.parameters) == 30
     # Rows 10, 12, 13, 17 and 30 are not claimed to be anything, but they are
@@ -112,7 +112,7 @@ def test_the_loader_agrees_with_an_independent_slicing():
     # This is the one check a misunderstanding shared with a synthetic writer
     # cannot pass.
     raw = np.loadtxt(EZ, delimiter=",")
-    scan = BigTableSpectralSweep(EZ, spectra_type="PL")
+    scan = BTSpectralSweep(EZ, spectra_type="PL")
     assert np.array_equal(raw[:, 1], scan.wavelength)
     assert np.array_equal(raw[:, 3::4], scan.spectra)
     par = raw[:, 0::4]                      # (n_rows, n_sweeps)
@@ -130,7 +130,7 @@ def test_gate_mode_recovers_what_the_filename_says(path, expected):
     # The loader is told nothing about which kind of scan this is; it reports the
     # correlation between the two declared gate rows. That it agrees with the
     # filename is evidence the row map is right.
-    scan = BigTableSpectralSweep(path, spectra_type="PL", gates=GATES)
+    scan = BTSpectralSweep(path, spectra_type="PL", gates=GATES)
     assert expected in scan.gate_mode
 
 
@@ -139,7 +139,7 @@ def test_the_gate_rows_outrank_everything_that_moved(path):
     # Evidence, not a detector: varying_parameters ranks by span against a row's
     # own RMS, so a leakage current can outrank a gate. Both gates and both
     # currents should be the top four either way.
-    scan = BigTableSpectralSweep(path, spectra_type="PL")
+    scan = BTSpectralSweep(path, spectra_type="PL")
     assert set(list(scan.varying_parameters())[:4]) == {
         "Gate Voltage 1", "Gate Voltage 2", "Gate Current 1", "Gate Current 2",
     }
@@ -148,7 +148,7 @@ def test_the_gate_rows_outrank_everything_that_moved(path):
 @pytest.mark.parametrize("path", [DOPING, EZ])
 def test_power_needs_no_scale_factor(path):
     # Both filenames say p20uW. The AttoCube's 0.303e6 would put this at 6e6.
-    scan = BigTableSpectralSweep(path, spectra_type="PL")
+    scan = BTSpectralSweep(path, spectra_type="PL")
     assert scan.curated_parameters["power"][1] == 1.0
     assert scan.curated_parameters["power"][2] == "µW"
     assert 15.0 < scan.power.mean() < 30.0
@@ -157,13 +157,13 @@ def test_power_needs_no_scale_factor(path):
 def test_positions_are_piezo_units_not_volts():
     # A distance needs a per-stage calibration no file carries, so the unit
     # states what the number is rather than converting it.
-    scan = BigTableSpectralSweep(EZ, spectra_type="PL")
+    scan = BTSpectralSweep(EZ, spectra_type="PL")
     assert scan.curated_parameters["scanner_x"][2] == "piezo units"
     assert scan.scanner_x[0] == pytest.approx(59.0)
 
 
 def test_the_field_scan_resolves_a_field_axis():
-    scan = BigTableSpectralSweep(EZ, spectra_type="PL", gates=GATES,
+    scan = BTSpectralSweep(EZ, spectra_type="PL", gates=GATES,
                                  geometry=GEOM, sweep="electric_field")
     assert scan.sweep_type == "electric_field"
     assert scan.sweep_unit == "mV/nm"
@@ -174,7 +174,7 @@ def test_the_field_scan_resolves_a_field_axis():
 
 
 def test_the_doping_scan_resolves_a_density_axis():
-    scan = BigTableSpectralSweep(DOPING, spectra_type="PL", gates=GATES,
+    scan = BTSpectralSweep(DOPING, spectra_type="PL", gates=GATES,
                                  geometry=GEOM, sweep="carrier_density")
     assert scan.sweep_type == "carrier_density"
     assert scan.sweep_axis[0] < 0 < scan.sweep_axis[-1]
@@ -185,7 +185,7 @@ def test_a_row_label_works_as_a_sweep_axis():
     # is what makes leaving a row unnamed cost nothing. Row 12 rather than Row 17
     # because 17 is held at one value all file, and declaring a held row as the
     # axis warns; that is correct, and a different test's business.
-    scan = BigTableSpectralSweep(EZ, spectra_type="PL", sweep="Row 12",
+    scan = BTSpectralSweep(EZ, spectra_type="PL", sweep="Row 12",
                                  sweep_label="Unknown channel", sweep_unit="A?")
     assert scan.sweep_axis_label == "Unknown channel (A?)"
     assert scan.sweep_axis.size == 101
@@ -195,11 +195,11 @@ def test_declaring_a_held_row_as_the_axis_warns():
     # Row 17 reads 1.0 at every sweep point. Plotted against it every point lands
     # in the same place and only one is drawn, so it says so rather than drawing.
     with pytest.warns(UserWarning, match="takes only 1 value"):
-        BigTableSpectralSweep(EZ, spectra_type="PL", sweep="Row 17")
+        BTSpectralSweep(EZ, spectra_type="PL", sweep="Row 17")
 
 
 def test_the_correction_ladder_runs(ez):
-    scan = BigTableSpectralSweep(
+    scan = BTSpectralSweep(
         EZ, spectra_type="PL", gates=GATES, cosmic_rays={},
         bg_region_nm=(705, 715), apply_jacobian=True,
     )
@@ -216,7 +216,7 @@ def test_it_is_a_drop_in_for_plotting_and_fitting(ez):
     # a matplotlib backend problem cannot fail collection for the other tests.
     import matplotlib
     matplotlib.use("Agg")
-    from tmdc_optics_tools import fitting, plotting
+    from leman import fitting, plotting
 
     fig, ax, mesh = plotting.plot_spectral_map(ez)
     # One mesh row per sweep point, per 0031.
@@ -236,29 +236,29 @@ def test_it_is_a_drop_in_for_plotting_and_fitting(ez):
 
 @pytest.mark.parametrize("path, names", [
     (str(DATA / "stark-shift" / "PL-dual-gate-sweep_26_05_15_14_03_18_iter_0.csv"),
-     "AttoCubeSpectralSweep"),
+     "ACSpectralSweep"),
     (str(DATA / "TRPL" / "TRPL_26_07_30_16_29_39_iter_0.csv"),
-     "AttoCubeTRPLSweep"),
+     "ACTRPLSweep"),
 ])
 def test_a_headed_export_is_refused_and_the_right_class_named(path, names):
     # The message asks the header which layout it is, rather than guessing at
     # the more common one.
     with pytest.raises(ValueError, match=f"Use {names} instead"):
-        BigTableSpectralSweep(path, spectra_type="PL")
+        BTSpectralSweep(path, spectra_type="PL")
 
 
 def test_a_two_row_file_is_sent_to_single_spectrum():
     path = str(DATA / "single-spectra" / "ref_single_spectrum_26_07_01_14_42_47.csv")
     with pytest.raises(ValueError, match="Load it with SingleSpectrum"):
-        BigTableSpectralSweep(path, spectra_type="PL")
+        BTSpectralSweep(path, spectra_type="PL")
 
 
 def test_an_image_whose_width_does_not_divide_is_refused():
     # 185 columns. The parameter companion written beside an image sequence is
     # headed, so this reaches the column-count test.
     path = str(DATA / "position-scan" / "PL" / "pl_26_06_26_10_19_26_iter_0.csv")
-    with pytest.raises(ValueError, match="Use AttoCubeSpectralSweep instead"):
-        BigTableSpectralSweep(path, spectra_type="PL")
+    with pytest.raises(ValueError, match="Use ACSpectralSweep instead"):
+        BTSpectralSweep(path, spectra_type="PL")
 
 
 def test_an_image_whose_width_does_divide_is_still_refused():
@@ -267,14 +267,14 @@ def test_an_image_whose_width_does_divide_is_still_refused():
     # committed frame rather than a synthetic one.
     path = str(DATA / "exciton-diffusion" / "power_dep_iter_0000.csv")
     with pytest.raises(ValueError, match="do not share one axis"):
-        BigTableSpectralSweep(path, spectra_type="PL")
+        BTSpectralSweep(path, spectra_type="PL")
 
 
 def test_the_attocube_loader_refuses_a_bigtable_file():
     # The mirror refusal. Its message names this class only when the column
     # count divides by four, which a BigTable export's does.
-    with pytest.raises(ValueError, match="BigTableSpectralSweep"):
-        AttoCubeSpectralSweep(EZ, spectra_type="PL")
+    with pytest.raises(ValueError, match="BTSpectralSweep"):
+        ACSpectralSweep(EZ, spectra_type="PL")
 
 
 def test_hdf5_is_refused_in_both_directions(tmp_path, ez):
@@ -282,13 +282,13 @@ def test_hdf5_is_refused_in_both_directions(tmp_path, ez):
         ez.to_hdf5(tmp_path / "x.h5")
     h5 = str(DATA / "stark-shift" / "PL-dual-gate-sweep_26_05_15_14_03_18_iter_0.h5")
     with pytest.raises(NotImplementedError, match="cannot be read as HDF5"):
-        BigTableSpectralSweep(h5)
+        BTSpectralSweep(h5)
 
 
 def test_the_wiring_is_never_assumed():
     # It varies between samples on this setup, so an undeclared scan refuses
     # rather than defaulting to the rows _CURATED names.
-    scan = BigTableSpectralSweep(EZ, spectra_type="PL")
+    scan = BTSpectralSweep(EZ, spectra_type="PL")
     with pytest.raises(ValueError, match="not declared"):
         scan.v_top
     # gate_mode is the exception: it describes an undeclared scan on purpose.
@@ -299,7 +299,7 @@ def test_gate_three_has_a_voltage_and_no_current():
     # Row 9 is a gate voltage; whichever row carries its current is one of the
     # unidentified ones, so it is not paired. A voltage and no current is the
     # honest outcome, not an error.
-    scan = BigTableSpectralSweep(
+    scan = BTSpectralSweep(
         EZ, spectra_type="PL",
         gates={"top": "Gate Voltage 3", "bottom": "Gate Voltage 1",
                "channel": None})
@@ -353,7 +353,7 @@ def _write(path, *, n_px=40, n_blocks=3, mismatch=False, long_block=False,
 def test_disagreeing_signal_columns_warn_and_name_the_pixel(tmp_path):
     path = _write(tmp_path / "mismatch.csv", mismatch=True)
     with pytest.warns(UserWarning, match=r"at pixel 2, sweep point 0") as caught:
-        scan = BigTableSpectralSweep(path, spectra_type="PL")
+        scan = BTSpectralSweep(path, spectra_type="PL")
     # The third column is what is read, so the 999.0 does not reach `spectra`.
     assert scan.spectra[2, 0] == pytest.approx(100.0)
     # Measured: the warning must blame the line that built the scan.
@@ -363,7 +363,7 @@ def test_disagreeing_signal_columns_warn_and_name_the_pixel(tmp_path):
 def test_a_parameter_row_past_the_block_warns(tmp_path):
     path = _write(tmp_path / "long.csv", long_block=True)
     with pytest.warns(UserWarning, match=r"row 31, past the 30 rows") as caught:
-        BigTableSpectralSweep(path, spectra_type="PL")
+        BTSpectralSweep(path, spectra_type="PL")
     assert caught[0].filename == __file__
 
 
@@ -373,7 +373,7 @@ def test_a_good_synthetic_file_is_silent(tmp_path):
     path = _write(tmp_path / "clean.csv")
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        scan = BigTableSpectralSweep(path, spectra_type="PL")
+        scan = BTSpectralSweep(path, spectra_type="PL")
     assert scan.n_sweeps == 3
     assert scan.n_pixels == 40
 
@@ -384,37 +384,37 @@ def test_an_axis_that_stops_part_way_is_refused(tmp_path):
     # division by zero two steps later. Refused on the axis instead.
     path = _write(tmp_path / "stops.csv", axis_stops_early=True)
     with pytest.raises(ValueError, match="does not increase"):
-        BigTableSpectralSweep(path, spectra_type="PL")
+        BTSpectralSweep(path, spectra_type="PL")
 
 
 def test_blocks_on_different_axes_are_refused(tmp_path):
     path = _write(tmp_path / "split.csv", split_axis=True)
     with pytest.raises(ValueError, match="do not share one axis"):
-        BigTableSpectralSweep(path, spectra_type="PL")
+        BTSpectralSweep(path, spectra_type="PL")
 
 
 def test_a_width_that_is_not_a_whole_block_is_refused(tmp_path):
     # 9 columns from three 3-wide blocks.
     path = _write(tmp_path / "ragged.csv", ragged_width=True)
     with pytest.raises(ValueError, match="not a whole number of 4-column"):
-        BigTableSpectralSweep(path, spectra_type="PL")
+        BTSpectralSweep(path, spectra_type="PL")
 
 
 def test_a_file_with_no_measurement_is_refused(tmp_path):
     path = _write(tmp_path / "empty.csv", all_zero=True)
     with pytest.raises(ValueError, match="contains no spectra"):
-        BigTableSpectralSweep(path, spectra_type="PL")
+        BTSpectralSweep(path, spectra_type="PL")
 
 
 def test_spectra_type_is_required(tmp_path):
     path = _write(tmp_path / "clean.csv")
     with pytest.raises(ValueError, match="spectra_type is required"):
-        BigTableSpectralSweep(path)
+        BTSpectralSweep(path)
 
 
 def test_the_curated_registry_is_the_bigtable_one(tmp_path):
     path = _write(tmp_path / "clean.csv")
-    scan = BigTableSpectralSweep(path, spectra_type="PL")
+    scan = BTSpectralSweep(path, spectra_type="PL")
     labels = {k: v[0] for k, v in scan.curated_parameters.items()}
     assert labels["v_top"] == "Gate Voltage 1"
     assert labels["v_bot"] == "Gate Voltage 2"
@@ -430,4 +430,4 @@ def test_there_is_no_roi_argument(tmp_path):
     # be told, not silently ignored.
     path = _write(tmp_path / "clean.csv")
     with pytest.raises(TypeError, match="roi"):
-        BigTableSpectralSweep(path, spectra_type="PL", roi=1)
+        BTSpectralSweep(path, spectra_type="PL", roi=1)

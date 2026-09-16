@@ -1,5 +1,5 @@
 """
-What ``_AttoCubeImage.show_image`` draws on top of the image, and what it labels.
+What ``_ACImg.show_image`` draws on top of the image, and what it labels.
 
 The legend is built by ``show_image`` from the artists it actually drew. Neither
 drawer can build it: ``ax.legend(handles=[...])`` takes an explicit list, so a
@@ -21,7 +21,7 @@ import warnings
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.loaders import AttoCubePLImage
+from leman.loaders import ACImg
 
 SHAPE = (8, 8)
 SIGNAL_FILL = 100.0
@@ -38,7 +38,7 @@ def _image(tmp_path, name="frame.csv", **kwargs):
     img[BG_REGION] = 1.0
     path = tmp_path / name
     np.savetxt(path, img, delimiter=",")
-    return AttoCubePLImage(path, **kwargs)
+    return ACImg(path, **kwargs)
 
 
 def _drawn(ax):

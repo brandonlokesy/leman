@@ -1,6 +1,6 @@
 # Defect register
 
-Findings register for `tmdc_optics_tools`, from a full read of the package.
+Findings register for `leman`, from a full read of the package.
 
 **What belongs here:** something that is *wrong* — a crash, a silently wrong number, a
 dead parameter, documentation that contradicts the code, duplication. The diagnosis is
@@ -43,7 +43,7 @@ below tracks what is left.
 *(A1–A3 fixed; A4 deferred; **A5 fixed 2026-08-07**, in the PR #19 merge rather than by a
 change aimed at it; **A6 fixed 2026-07-30**; **A8 fixed 2026-08-06**
 with E14; **A10 and A7 fixed 2026-08-07**; **A9 and B1 both fixed 2026-08-10**, which
-closes the `AttoCubePLScanRealSpace` pass; **A19–A21 fixed 2026-08-17/18** on
+closes the `ACImgSweep` pass; **A19–A21 fixed 2026-08-17/18** on
 `fix/nest-level-separation`; **A23 fixed 2026-08-18**; **A25 and A29 fixed
 2026-08-25**, the two Raman-loader entries, taken as two changes.
 **A18** and **A22** are the live bugs left in this section, joined by **A24** and
@@ -247,8 +247,8 @@ zero-filled blocks, renumbered to 50–52 so they stay *trailing* — which load
 `53 declared, 3 zero-filled and dropped`. Keep the padding trailing if that file is
 ever regenerated; interleaved zeros take the warn-and-drop-nothing branch instead.
 
-**A7. `AttoCubePLScanRealSpace` orders its files lexicographically.**
-**[FIXED — 2026-08-07]** **[verified against real data]** `AttoCubePLScanRealSpace.__init__`
+**A7. `ACImgSweep` orders its files lexicographically.**
+**[FIXED — 2026-08-07]** **[verified against real data]** `ACImgSweep.__init__`
 did `sorted(Path(path).glob(f"{prefix}*.csv"))` and nothing reordered afterwards, so a
 sequence numbered past 9 came back as `iter_0, iter_1, iter_10, iter_11, iter_2, …`.
 Every frame was then paired with the wrong index — animations play out of order, and
@@ -272,7 +272,7 @@ animation. `tests/test_converters.py::test_unpadded_stack_is_in_acquisition_orde
 pins it with **unpadded** names, which is the case the branch's own fixture could not
 exhibit.
 
-*Fixed* by **moving** `AttoCubeTRPLSweep._order_by_iter` and `_ITER_INDEX` to a
+*Fixed* by **moving** `ACTRPLSweep._order_by_iter` and `_ITER_INDEX` to a
 module-level helper (after `_drop_unwritten_blocks`, where the other
 "what is this file" logic lives) and calling it from both loaders — not copying it,
 which would have made a third near-duplicate of the D-section kind. Three changes to
@@ -427,7 +427,7 @@ and the wobble-versus-sweep distinction is pinned on both sides.
 **[FIXED — 2026-08-10, 679ebf9]** **[verified against real data]** Reported
 2026-07-31. `loaders.py:_is_image_csv` tested only whether the first line parses as
 floats, which a `SingleSpectrum` CSV does (its first row is the wavelength axis). So
-`AttoCubePLScanRealSpace` pointed at a directory of single spectra loaded each as a
+`ACImgSweep` pointed at a directory of single spectra loaded each as a
 2×N "image" — a two-row frame that every downstream diffusion and animation routine
 would happily process into nonsense.
 
@@ -440,7 +440,7 @@ package.
 `_classify_csv`, so a spectrum sitting beside the frames is reported as skipped
 rather than written out as a two-pixel-tall TIFF, and `convert_image_csv_to_tiff`
 refuses one outright using the existing `_CSV_KIND_REASON` wording. The helper moved
-from a `staticmethod` on `AttoCubePLScanRealSpace` to module level in that change so
+from a `staticmethod` on `ACImgSweep` to module level in that change so
 a second caller could reach it. Pinned by
 `tests/test_converters.py::test_spectrum_beside_frames_is_not_converted`.
 
@@ -472,7 +472,7 @@ Three decisions worth recording, in the order they were made:
 
 *Test:* `tests/test_loaders_real_space.py`, 8 new cases (10 → 18): the three-row
 boundary, the three header kinds, a directory of single spectra raising with
-`SingleSpectrum` named, a temporal export naming `AttoCubeTRPLSweep`, a stray spectrum
+`SingleSpectrum` named, a temporal export naming `ACTRPLSweep`, a stray spectrum
 among frames warned by name, an export among frames staying silent, and
 `caught[0].filename == __file__` for the new `stacklevel=2` — measured, per A11,
 rather than read off the call stack. The two committed-data tests pass unchanged.
@@ -490,7 +490,7 @@ is what kept `diffusion` correct.
 **A11. Warning locations across `loaders.py` are unverified.** — *open, reported
 2026-08-07* All 15 `warnings.warn` calls hand-tune `stacklevel`, spread across the
 values 2, 3, 4 and 5, and not one has a test pinning where it points. The one chain
-that has been traced is wrong: for `AttoCubeTRPLSweep`, `__init__` →
+that has been traced is wrong: for `ACTRPLSweep`, `__init__` →
 `_decode_and_describe` → `_decode` → `_decode_dir` → `_order_by_iter` needs **6** to
 reach the researcher's line, and passes 4, which lands inside
 `_decode_and_describe` instead.
@@ -521,7 +521,7 @@ chain is `_nearest` → `_index_for_value` → *lambda* → `_sweep_selector` �
 `nearest_index` → the caller's own line, `get_spectrum_at` → a line inside the loader rather than the caller's.
 
 *Third confirmed chain (2026-08-26).* The Jacobian-without-background warning
-carries `stacklevel=3`, and from `AttoCubeSpectralSweep.__init__` that lands **one
+carries `stacklevel=3`, and from `ACSpectralSweep.__init__` that lands **one
 level above** the line that constructed the scan — `sys:1` for a module-level
 call, and the caller's caller inside a function. It needs **2**: `__init__` is
 entered through `type.__call__`, which is C and consumes no Python frame, so level
@@ -733,7 +733,7 @@ served the file's own counts and the repair was dropped: `plot_spectral_map`,
 therefore showed the repair on one axis and the spikes on the other, and
 `fit_scan_peak(x_axis="wavelength")` fitted the spikes.
 
-**Root cause was an asymmetry in the class, not four slips.** `AttoCubeSpectralSweep`
+**Root cause was an asymmetry in the class, not four slips.** `ACSpectralSweep`
 had `best_energy_spectra` and no wavelength-space counterpart, so each of those
 expressions names a *property* on one side and a *specific array* on the other — they
 read as symmetric and are not. `plot_single_spectrum` is the control: it spells the same
@@ -1428,7 +1428,7 @@ it, which the notebook now says instead of demonstrating.
 
 ## B. Dead parameters — accepted, documented, silently ignored
 
-**B1. `AttoCubePLScanRealSpace(bg_region=, bg_stat=)` are stored and never read.**
+**B1. `ACImgSweep(bg_region=, bg_stat=)` are stored and never read.**
 **[FIXED — 2026-08-10, 4fe8f24]** **[verified against real data]** They were assigned
 in `__init__` and read nowhere, so `load_frame()` returned `np.loadtxt(...)` untouched
 and constructing with a background region gave frames identical to constructing
@@ -1547,16 +1547,16 @@ code — the unit on both repr lines, the µm default, the unit reaching every f
 sequence, and the axis label read back off the axes — and the two that pass either way
 are the negative ones, which pin that no unit is printed when nothing was converted.
 
-**B3.** **[NOT A DEFECT — checked 2026-08-20]** `AttoCubeSampleImage.__init__`
-(`AttoCubeSampleImage.__init__`) doesn't forward
-`bg_region`/`bg_stat` to `_AttoCubeImage`, so sample images can't be
+**B3.** **[NOT A DEFECT — checked 2026-08-20]** `ACSampleImg.__init__`
+(`ACSampleImg.__init__`) doesn't forward
+`bg_region`/`bg_stat` to `_ACImg`, so sample images can't be
 background-corrected even though the base class supports it.
 
 *The mechanism is as described; the conclusion that it should be fixed is wrong.* The
 override replaces the base's four-parameter `__init__` with a two-parameter one and calls
 `super().__init__(path, laser_ref)`, so `bg_region` and `bg_stat` always take their
 defaults. Python does not merge the two signatures — the subclass's is the whole public
-signature — so `AttoCubeSampleImage(path, bg_region=R)` is a `TypeError`. The **attribute**
+signature — so `ACSampleImg(path, bg_region=R)` is a `TypeError`. The **attribute**
 still exists, because the base assigns it; it is simply always `None`.
 
 **A white-light sample image should not take a scalar background**, for two reasons that
@@ -1580,7 +1580,7 @@ additive constant under autoscaling (`rescale_intensity(in_range="image")` maps 
 onto 0–1 either way). The knob would move `plot_image`'s colour-bar numbers and the
 meaning of an explicit `clim=`, and change nothing else. And where a white-light
 background genuinely has to go, the package already removes it with an estimator shaped
-like it: `AttoCubeLaserReferenceImage._preprocess` runs a white top-hat, because that
+like it: `ACLaserRefImg._preprocess` runs a white top-hat, because that
 background is flake contrast and reflectivity gradients rather than a constant.
 
 So the rule is not *images never get a background subtracted*. It is: subtract when a
@@ -1597,7 +1597,7 @@ forward.
 
 *Recorded* as a one-line **don't** in `.claude/CLAUDE.md`, and pinned by
 `tests/test_image_background_scope.py` (5 cases): a PL frame takes a region and applies
-the named statistic, `AttoCubeSampleImage` and `SingleImage` both refuse one at the
+the named statistic, `ACSampleImg` and `SingleImage` both refuse one at the
 signature, and both still carry `bg_region is None` so a viewer reading the attribute off
 a duck-typed image finds no region rather than an `AttributeError`. The `__init__`
 override is load-bearing because of that refusal — deleting it would inherit the base's
@@ -1625,7 +1625,7 @@ re-exported as `E_CHARGE`/`EPS_0` — so only the one name went.
 **B5. `show_image`'s background-region box could never be labelled, and an absent
 region was a silent no-op.** **[FIXED — 2026-08-20]** **[verified by running]** Found
 2026-08-20 while settling **B3**. Three faults in four lines of
-`_AttoCubeImage.show_image`:
+`_ACImg.show_image`:
 
 ```python
 if show_bg_region:
@@ -1642,9 +1642,9 @@ if laser_annotation and self.laser_ref is not None:
   implies a legend*. In fact it could only turn on the **circle's** legend, and only when
   a circle was being drawn anyway.
 - **An absent region drew nothing and said nothing.** After **B3** that is the permanent
-  state on `AttoCubeSampleImage` and `SingleImage`, which take no `bg_region` at all.
+  state on `ACSampleImg` and `SingleImage`, which take no `bg_region` at all.
 
-Measured on an `AttoCubePLImage`, counting artists on the axes afterwards:
+Measured on an `ACImg`, counting artists on the axes afterwards:
 
 | call | boxes | circles | legend |
 |---|---|---|---|
@@ -1675,7 +1675,7 @@ circle-only legend used to appear and now does not.
 
 `stacklevel=2` is **measured**, not one of **A11**'s fifteen. Every reachable path is the
 researcher calling `show_image` directly: the one override,
-`AttoCubeLaserReferenceImage.show_image`, never passes `show_bg_region`, so the warning
+`ACLaserRefImg.show_image`, never passes `show_bg_region`, so the warning
 cannot arrive through it.
 
 *Test:* `tests/test_show_image_annotations.py`, 6 cases, reading the artists back off the
@@ -1684,7 +1684,7 @@ the box in the legend, box and circle labelled together, `legend=False` honoured
 warning with `caught[0].filename == __file__` — and the two that pass either way are the
 did-not-regress ones.
 
-*Adjacent, not fixed:* `AttoCubeLaserReferenceImage.show_image` sets `self.laser_ref =
+*Adjacent, not fixed:* `ACLaserRefImg.show_image` sets `self.laser_ref =
 self`, calls the base, then resets it to `None`. If the base call raises, the object is
 left pointing at itself permanently.
 
@@ -1738,7 +1738,7 @@ standing. Not raised: the numbers are right either way and the researcher may be
 mid-calibration. Not silent: nothing downstream can detect it. Restating the unit
 silences it, which is what decision 0005's polarity flip does — `-1e9` is still nA. Its
 `stacklevel=3` is **measured** on both live doors, not counted off `def` lines; it is a
-new site, not one of **A11**'s fifteen. `AttoCubePLVabScan` adds a frame and so points
+new site, not one of **A11**'s fifteen. `ACPLVabScan` adds a frame and so points
 at its own `super().__init__`; it is deprecated and gets a comment, not an argument.
 
 Two tests were pinning the defect as correct behaviour:
@@ -1781,11 +1781,11 @@ Worse than missing docs, because they will be acted on.
 `__init__.py`'s quick start used `AttoCubePLScan`, `plotting.plot_pl_map`, and
 `DeviceGeometry(t_hbn=..., b_hbn=..., tmdc=...)` — **none of which existed**.
 
-*Fixed:* the quick start now reads `AttoCubeSpectralSweep`, `plot_spectral_map` and
+*Fixed:* the quick start now reads `ACSpectralSweep`, `plot_spectral_map` and
 `DeviceGeometry.from_single(...)`, and declares `gates=` as the loader requires. It was
 carried along by the 2026-07-30 rewrite rather than by a change aimed at this entry, which
 is why it was never marked. Note that this entry's own suggested replacements
-(`AttoCubePLVabScan`, `plot_pl_map_Vab_scan`) had themselves been superseded by the time
+(`ACPLVabScan`, `plot_pl_map_Vab_scan`) had themselves been superseded by the time
 the fix landed — the first is deprecated, the second is a shim.
 
 **C2.** **[FIXED — 2026-08-20]** README §5 and §6 pass `bg_region=` to `fit_scan_peak` and
@@ -1806,21 +1806,22 @@ Every keyword the two snippets now name was checked against
 does not accept is a `TypeError` on the first line the reader runs.
 
 Not addressed here, and still open in **C4**: §2 loads with the deprecated
-`AttoCubePLVabScan` and its example output says `AttoCubePLScan`, a class that does not
-exist.
+`ACPLVabScan` (its example output was updated from `AttoCubePLScan` to
+`ACSpectralSweep` during the Léman rename, but the section still demonstrates
+the deprecated loader).
 
-**C3.** `AttoCubePLVabScan` docstring says the Jacobian is applied "if `True`
+**C3.** `ACPLVabScan` docstring says the Jacobian is applied "if `True`
 (default)"; the signature default is `False`, and `False` is intended. README §2
 inherits the same claim. Fix the docs, not the code.
 
 **C4.** README's package-structure tree omits `diffusion.py` and the whole
 `reference/` sub-package; its module-reference tables omit `SingleSpectrum`,
-`SingleImage`, `AttoCubePLImage`, `plot_power_series`, `animate_panels`, and the
+`SingleImage`, `ACImg`, `plot_power_series`, `animate_panels`, and the
 `AnimationPanel` family.
 
 **C5.** `docs/api/constants.md` is a hand-maintained mirror of `constants.py` while
 every other API page uses `::: mkdocstrings`. It will drift.
-*Fix:* keep the prose intro, replace the tables with `::: tmdc_optics_tools.constants`.
+*Fix:* keep the prose intro, replace the tables with `::: leman.constants`.
 
 **C6. Existing docstrings predate the docstring convention.** Added 2026-07-31, when
 *a docstring is a contract, not a changelog* was written into CLAUDE.md. The rule is
@@ -1832,12 +1833,12 @@ Mostly self-inflicted, by the 2026-07-30 rewrite. The known sites:
 
 | Site | What offends |
 |---|---|
-| `AttoCubeTRPLSweep` class | A paragraph arguing why it is a separate class rather than a mode |
-| `AttoCubeTRPLSweep.spectra_type` param | "Deliberately unlike `AttoCubeSpectralSweep`, which requires…" |
+| `ACTRPLSweep` class | A paragraph arguing why it is a separate class rather than a mode |
+| `ACTRPLSweep.spectra_type` param | "Deliberately unlike `ACSpectralSweep`, which requires…" |
 | `best_energy_spectra` | Defends the decision at length — this is the worked before/after in `dev/design-principles.md` §4 |
 | `_cross_check_companion` | Why there is no value check, ending "which is how warnings get ignored" |
-| `loaders.py` module docstring, `AttoCubePLVabScan` | "Deprecated **pre-rename** name", "reproduces the **pre-rename** behaviour" |
-| `AttoCubeSpectralSweep` note **[FIXED — 2026-08-04]** | "no reflectance export has been characterised yet (see **E9** in `dev/defects.md`)" — stale as well as misplaced. Note deleted; the layout fact restated positively on the `.csv` bullet, which now says PL/R/RC share the block layout and that it is identified from the header rather than from `spectra_type`. |
+| `loaders.py` module docstring, `ACPLVabScan` | "Deprecated **pre-rename** name", "reproduces the **pre-rename** behaviour" |
+| `ACSpectralSweep` note **[FIXED — 2026-08-04]** | "no reflectance export has been characterised yet (see **E9** in `dev/defects.md`)" — stale as well as misplaced. Note deleted; the layout fact restated positively on the `.csv` bullet, which now says PL/R/RC share the block layout and that it is identified from the header rather than from `spectra_type`. |
 | `DeviceGeometry.electric_field` | Two dates: "before 2026-07-30", "~0.6 % higher than pre-2026-07-30 results" |
 | 6 sites in `loaders.py` | `:func:`_drop_unwritten_blocks``, `:attr:`_CURATED``, `:meth:`_cross_check_companion`` cited from *public* docstrings |
 | `hdf5.py` module docstring | "What is deliberately *not* stored" — content is good, framing is a defence |
@@ -1862,8 +1863,8 @@ private ones are inlined.
 **[FIXED — 2026-07-31]** **[verified against the built site]** mkdocstrings-python
 defaults `inherited_members` to **false**, so when the sweep classes' shared surface
 moved onto the private `_AttoCubeSweep` base on 2026-07-30, every inherited member
-stopped being rendered. `AttoCubeSpectralSweep` went to **6** documented members and
-`AttoCubeTRPLSweep` to **3** — `sweep_axis`, `v_top`, `power`, `ef`, `to_hdf5`,
+stopped being rendered. `ACSpectralSweep` went to **6** documented members and
+`ACTRPLSweep` to **3** — `sweep_axis`, `v_top`, `power`, `ef`, `to_hdf5`,
 `get_parameter`, `varying_parameters`, `gate_mode`, `sweep_grid` and the rest were all
 absent from the site. Only members redefined on the subclass survived.
 
@@ -1964,13 +1965,13 @@ change, and it wants the whole line checked rather than one name pulled out of i
 
 **[FIXED — 2026-08-20]** The whole line was checked, as this asked. `_draw_region_box`
 is imported and never used under the bare name: the one call site in `loaders` is
-`_AttoCubeImage.show_image`, which spells it `processing._draw_region_box`. The other two
+`_ACImg.show_image`, which spells it `processing._draw_region_box`. The other two
 names on the line are used unqualified and stay — `jacobian_correction_wvl2E` at two
 sites, `subtract_background` at three. `loaders` also does `from . import processing`, so
 the qualified call site needs nothing added.
 
 **D2.** Two laser-circle drawers with different styling defaults:
-`loaders._AttoCubeImage._add_laser_circle` (dashed, no halo, `loaders.py:5088`) and
+`loaders._ACImg._add_laser_circle` (dashed, no halo, `loaders.py:5088`) and
 `plotting._draw_laser_circle` (solid + halo), plus a third inline copy in
 `ImageSequencePanel.init_artists`.
 *Fix:* one helper in `plotting`; `loaders` calls it.
@@ -1988,7 +1989,7 @@ in the package sits between them and that axes holds only the image and the circ
 the circle gains the helper's `label`, inert because no legend is built anywhere in the
 animation-panel path.
 
-**Still open:** `loaders._AttoCubeImage._add_laser_circle`. Closing it has to settle a
+**Still open:** `loaders._ACImg._add_laser_circle`. Closing it has to settle a
 question this half did not raise — the two drawers spell the label differently
 (`"Laser 1/e² (5.0 px)"` against `"$1/e^2$ Radius (5.0 px)"`), and the `loaders` one is
 visible, because `show_image(legend=True)` puts it in a legend.
@@ -2059,7 +2060,7 @@ Raised `KeyError` if *any* curated row was missing — including `Scanner X`/`Sc
 Y`, which the code itself marks provisional. A scan file from a different instrument
 config couldn't be loaded at all.
 
-*Fixed as part of the `AttoCubeSpectralSweep` rewrite, as this item asked.* No
+*Fixed as part of the `ACSpectralSweep` rewrite, as this item asked.* No
 curated row is mandatory now: the file loads, and each curated property raises (with
 the available labels listed) only if accessed. The one fail-fast that remains is for
 the rows the **declared** `sweep=` needs, so the requirement follows what the caller
@@ -2143,8 +2144,8 @@ an unmaintained wrapper, not the ffmpeg *binary* matplotlib needs. Use
 only used by `reference/` and would fit better as an extra.
 
 *Also:* the installed editable metadata advertises a console script that does not
-exist on `main`. `src/tmdc_optics_tools.egg-info/entry_points.txt` declares
-`tmdc-convert = tmdc_optics_tools.converters:main`, but `converters.py` lives only on
+exist on `main`. `src/leman.egg-info/entry_points.txt` declares
+`tmdc-convert = leman.converters:main`, but `converters.py` lives only on
 `dev/hdf5` (commit `ecfb87d`) and `pyproject.toml` has no `[project.scripts]` table.
 It is leftover metadata from a `pip install -e .` made while that branch was checked
 out; `egg-info/` is gitignored, so this is local-only and clears on reinstall.
@@ -2153,14 +2154,14 @@ the *installed* package look like it has a CLI that the source tree does not hav
 Whether the converters belong on `main` is a merge decision, not a packaging one.
 
 **E6. Small sharp edges.**
-- `AttoCubeLaserReferenceImage.show_image` temporarily sets `self.laser_ref = self`
+- `ACLaserRefImg.show_image` temporarily sets `self.laser_ref = self`
   and resets it afterwards — leaks the mutation if the plot call raises.
 - Default threshold is `"1/e"` in `plot_diffusion_cloud` but `"otsu"` in
   `DiffusionCloudPanel`, so the same image analysed statically and in an animation
   gives different contours.
 - `analyse_diffusion_cloud` rebinds its own `threshold` parameter to the computed
   value (line 316).
-- `diffusion` uses an absolute `from tmdc_optics_tools.loaders import ...`
+- `diffusion` uses an absolute `from leman.loaders import ...`
   where the rest of the package uses relative imports.
 - `DiffusionSequenceResult.x_real` indexes `vals[0]` — `IndexError` on an empty
   sequence.
@@ -2623,7 +2624,7 @@ caller unpacking positionally, so the cost rises with every caller added. Fixing
 
 **E22. Importing the package imports scikit-learn.** **[FIXED — 2026-08-20]**
 `plotting` imports `fitting` at module level, and `fitting` imports
-`sklearn.linear_model.Lasso` at module level, so `import tmdc_optics_tools` pulls in
+`sklearn.linear_model.Lasso` at module level, so `import leman` pulls in
 scikit-learn for anyone who only wants to plot. It is declared in `pyproject.toml`, so
 this is not a missing dependency — but it arrived with `fit_sparse_lifetime`, and every
 existing environment failed to import the package until scikit-learn was installed. A
@@ -2638,7 +2639,7 @@ the import says so.
 Removed in the same edit: `fitting` imported `from . import processing` **twice**, three
 lines apart. Only the line carrying `constants` alongside it survives.
 
-*Test:* `tests/test_import_cost.py`, 2 cases. The first runs `import tmdc_optics_tools`
+*Test:* `tests/test_import_cost.py`, 2 cases. The first runs `import leman`
 in a **fresh interpreter** and asserts no `sklearn` module is present afterwards — it has
 to be a subprocess, because by the time the suite reaches this file the session has
 imported scikit-learn for something else and `sys.modules` here would say nothing about
@@ -2668,7 +2669,7 @@ grid animation through `as_image_grid` defeats that.
 
 **E25. Every `:func:`/`:class:` cross-reference renders literally on the docs site.**
 The docstrings use reStructuredText roles — ``:func:`write_sweep` ``,
-``:class:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep` `` — **504 of them** across
+``:class:`~leman.loaders.ACSpectralSweep` `` — **504 of them** across
 eight modules:
 
 | module | roles | | role | count |
@@ -2698,7 +2699,7 @@ them there.
 *This is not a configuration problem.* Cross-references work on these pages when something
 else generates them: `signature_crossrefs: true` produces four real
 `<a class="autorefs">` links on the `hdf5` page alone, pointing at `write_sweep`,
-`read_sweep`, `AttoCubeSpectralSweep` and `AttoCubeTRPLSweep`. The linking machinery is
+`read_sweep`, `ACSpectralSweep` and `ACTRPLSweep`. The linking machinery is
 present and working; the docstrings are simply written in a syntax it does not read.
 
 *Fix, measured rather than assumed.* mkdocstrings' own cross-reference syntax is
@@ -2706,11 +2707,11 @@ present and working; the docstrings are simply written in a syntax it does not r
 
 ```
 before   Read an HDF5 file written by :func:`write_sweep`.
-after    Read an HDF5 file written by [`write_sweep`][tmdc_optics_tools.hdf5.write_sweep]
+after    Read an HDF5 file written by [`write_sweep`][leman.hdf5.write_sweep]
 ```
 
 ```html
-<a class="autorefs autorefs-internal" href="#tmdc_optics_tools.hdf5.write_sweep">
+<a class="autorefs autorefs-internal" href="#leman.hdf5.write_sweep">
   <code>write_sweep</code></a>
 ```
 
@@ -2723,7 +2724,7 @@ regular expression:
   Sphinx; `[...][...]` does not. Every one of the 504 needs its module path worked out.
   A wrong path is *caught*, though — see the note below — so this is tedious rather than
   dangerous.
-- **`~` means something.** `:class:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep``
+- **`~` means something.** `:class:`~leman.loaders.ACSpectralSweep``
   displays only the last component. The Markdown form needs that split by hand into link
   text and target.
 - **Some are private.** A role pointing at `_classify_csv` or `_order_by_iter` has no
@@ -2737,9 +2738,9 @@ claimed the opposite: `mkdocs_autorefs` logs `Could not find cross-reference tar
 warning into a failed build.
 
 ```
-WARNING - mkdocs_autorefs: api\hdf5.md: from src\tmdc_optics_tools\hdf5.py:442:
-          (tmdc_optics_tools.hdf5.read_sweep) Could not find cross-reference target
-          'tmdc_optics_tools.hdf5.no_such_function'
+WARNING - mkdocs_autorefs: api\hdf5.md: from src\leman\hdf5.py:442:
+          (leman.hdf5.read_sweep) Could not find cross-reference target
+          'leman.hdf5.no_such_function'
 Aborted with 1 warnings in strict mode!
 ```
 

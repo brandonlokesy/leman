@@ -8,7 +8,7 @@
 
 ## Context
 
-`AttoCubePLVabScan` was named and built for one measurement — a gate sweep on PL — and
+`ACPLVabScan` was named and built for one measurement — a gate sweep on PL — and
 was being used for reflectance, power series and rasters. It hardcoded "PL" in labels,
 took eight separate `*_label` / `power_scale` arguments, and raised `KeyError` at load if
 *any* curated row was missing, so a file from a different instrument configuration could
@@ -16,7 +16,7 @@ not be loaded at all.
 
 ## Decision
 
-Renamed and rewritten as `AttoCubeSpectralSweep`.
+Renamed and rewritten as `ACSpectralSweep`.
 
 - **`spectra_type=` is required, keyword-only, and has no default.** It is written into
   exported metadata and trusted thereafter, so a default would let a guess outlive the

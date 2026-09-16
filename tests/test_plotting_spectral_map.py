@@ -40,8 +40,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import plotting
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep
+from leman import plotting
+from leman.loaders import ACSpectralSweep
 
 from test_loaders import (
     PARAMS, POWER_SCALE, WAVELENGTH, make_spectral_csv,
@@ -73,7 +73,7 @@ def _close_figures():
     ("piezo_y", PARAMS["Scanner Y"]),
 ])
 def test_y_axis_is_the_declared_sweep(csv_path, sweep, expected):
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL", sweep=sweep)
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL", sweep=sweep)
     fig, ax, mesh = plotting.plot_spectral_map(scan)
 
     # shading="auto" resolves to "nearest" for equal-shaped X/Y/C, so
@@ -89,7 +89,7 @@ def test_y_axis_is_the_declared_sweep(csv_path, sweep, expected):
 
 
 def test_x_axis_switches_between_energy_and_wavelength(csv_path):
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL")
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL")
 
     _, ax_e, _ = plotting.plot_spectral_map(scan, x_axis="energy")
     _, ax_w, _ = plotting.plot_spectral_map(scan, x_axis="wavelength")
@@ -110,7 +110,7 @@ def test_the_mesh_holds_one_row_per_sweep_point(csv_path):
     2-D coordinate pair would flip it, and the other tests here would then fail
     inside ``_y_centres`` or on a shape, neither of which says what changed.
     """
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL")
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL")
     _, _, mesh = plotting.plot_spectral_map(scan, median_kernel=1)
 
     assert mesh.get_array().shape == (scan.n_sweeps, scan.n_pixels)
@@ -126,7 +126,7 @@ def test_the_mesh_holds_one_row_per_sweep_point(csv_path):
 # ---------------------------------------------------------------------------
 
 def test_old_name_warns_and_matches_new_name(csv_path):
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL", sweep="power")
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL", sweep="power")
 
     _, _, new_mesh = plotting.plot_spectral_map(scan)
     with pytest.warns(FutureWarning, match="plot_spectral_map"):
@@ -137,7 +137,7 @@ def test_old_name_warns_and_matches_new_name(csv_path):
 
 
 def test_old_name_forwards_keyword_arguments(csv_path):
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL")
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL")
 
     with pytest.warns(FutureWarning):
         _, ax, mesh = plotting.plot_pl_map_Vab_scan(
@@ -157,7 +157,7 @@ def nested(tmp_path):
     """A raster declared on raw rows, N_FAST inside N_SLOW."""
     path = tmp_path / "raster.csv"
     make_spectral_csv(path, params=RASTER)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    return ACSpectralSweep(str(path), spectra_type="PL",
                                  fast_sweep="Scanner X",
                                  slow_sweep="Scanner Y")
 
@@ -167,7 +167,7 @@ def contrast_scan(tmp_path, csv_path):
     """A reflectance scan with a reference, so the contrast source resolves."""
     ref = tmp_path / "reference.csv"
     _write_reference(ref, np.full(len(WAVELENGTH), 50.0))
-    return AttoCubeSpectralSweep(str(csv_path), spectra_type="R",
+    return ACSpectralSweep(str(csv_path), spectra_type="R",
                                  reference=str(ref))
 
 
@@ -233,7 +233,7 @@ def test_the_mapped_block_is_the_scans_own_grid_row(nested):
 
 
 def test_the_nest_keywords_need_a_declared_nest(csv_path):
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL")
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL")
 
     with pytest.raises(ValueError) as excinfo:
         plotting.plot_spectral_map(scan, slow=1.0)
@@ -249,7 +249,7 @@ def test_the_nest_keywords_need_a_declared_nest(csv_path):
 
 def test_y_axis_reads_the_sweep_against_another_quantity(csv_path):
     """Declared on the index, plotted against Scanner Y."""
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL")
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL")
     _, ax, mesh = plotting.plot_spectral_map(scan, y_axis="piezo_y")
 
     assert np.allclose(_y_centres(mesh), PARAMS["Scanner Y"])
@@ -257,7 +257,7 @@ def test_y_axis_reads_the_sweep_against_another_quantity(csv_path):
 
 
 def test_y_axis_names_itself_when_it_names_no_quantity(csv_path):
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL")
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL")
 
     with pytest.raises(ValueError, match="y_axis"):
         plotting.plot_spectral_map(scan, y_axis="not_a_quantity")
@@ -276,7 +276,7 @@ def test_y_axis_does_not_apply_to_a_nest(nested):
 # ---------------------------------------------------------------------------
 
 def test_the_raw_source_plots_the_files_own_counts(csv_path):
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL",
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL",
                                  apply_jacobian=False)
     _, _, mesh = plotting.plot_spectral_map(
         scan, spectra_source="raw", x_axis="wavelength", median_kernel=1)
@@ -303,7 +303,7 @@ def test_no_median_filter_runs_unless_a_kernel_is_named(csv_path):
     explicitly, so all of them would keep passing whatever the default were.
     This one names no kernel, which is what pins the default itself.
     """
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL",
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL",
                                  apply_jacobian=False)
     _, _, mesh = plotting.plot_spectral_map(
         scan, spectra_source="raw", x_axis="wavelength")
@@ -313,7 +313,7 @@ def test_no_median_filter_runs_unless_a_kernel_is_named(csv_path):
 
 def test_a_kernel_above_one_still_filters(csv_path):
     """The square filter stays reachable, so opting in must change the array."""
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="PL",
+    scan = ACSpectralSweep(str(csv_path), spectra_type="PL",
                                  apply_jacobian=False)
     _, _, mesh = plotting.plot_spectral_map(
         scan, spectra_source="raw", x_axis="wavelength", median_kernel=3)
@@ -341,7 +341,7 @@ def test_rescale_img_survives_a_guarded_contrast_pixel(tmp_path, csv_path):
     _write_reference(ref, counts)
 
     with pytest.warns(UserWarning, match="reference pixel"):
-        scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="R",
+        scan = ACSpectralSweep(str(csv_path), spectra_type="R",
                                      reference=str(ref))
 
     # The wavelength axis keeps the file's pixel order, so the guarded pixel is

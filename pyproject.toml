@@ -3,9 +3,9 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tmdc_optics_tools"
-version = "0.1.0a0"
-description = "Toolkit for gate-dependent PL spectroscopy on TMDC devices"
+name = "leman"
+version = "0.1.0"
+description = "Léman — Library for Exciton and Moiré Analysis in Nanostructures"
 requires-python = ">=3.9"
 authors = [{ name = "Brandon Loke" }]
 dependencies = [
@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-tmdc-convert = "tmdc_optics_tools.converters:main"
+leman-convert = "leman.converters:main"
 
 [project.optional-dependencies]
 # Extra colormap sources.  None is required: every default is a Matplotlib

@@ -1,4 +1,4 @@
-# tmdc_optics_tools/converters.py
+# leman/converters.py
 """
 Convert AttoCube CSV exports to compact formats.
 
@@ -57,7 +57,7 @@ convert_image_dir_to_tiff_stack
     A directory of image CSVs -> one multi-page ``.tif``, in acquisition order.
 convert_spectral_csv_to_hdf5
     Single spectral export -> ``.h5``, through the loader and
-    :func:`tmdc_optics_tools.hdf5.write_sweep`.
+    :func:`leman.hdf5.write_sweep`.
 convert_trpl_dir_to_hdf5
     A directory of TRPL decays -> one ``.h5``.
 convert_path
@@ -67,9 +67,9 @@ main
 
 Notes
 -----
-The HDF5 side loads with :class:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep`
-or :class:`~tmdc_optics_tools.loaders.AttoCubeTRPLSweep` and writes with
-:func:`tmdc_optics_tools.hdf5.write_sweep`, so there is one archive format in the
+The HDF5 side loads with :class:`~leman.loaders.ACSpectralSweep`
+or :class:`~leman.loaders.ACTRPLSweep` and writes with
+:func:`leman.hdf5.write_sweep`, so there is one archive format in the
 package and a converted sweep reopens by handing the ``.h5`` back to its loader.
 
 Only *spectra_type* is declared at conversion time, because a raw spectral export
@@ -92,8 +92,8 @@ import tifffile
 
 from .constants import SPECTROSCOPY_TYPES
 from .loaders import (
-    AttoCubeSpectralSweep,
-    AttoCubeTRPLSweep,
+    ACSpectralSweep,
+    ACTRPLSweep,
     _CSV_KIND_REASON,
     _classify_csv,
     _order_by_iter,
@@ -244,7 +244,7 @@ def _refuse_existing(target: Path, overwrite: bool) -> Path:
     Refuse *target* if it already exists, creating nothing.
 
     Overwriting is opt-in for the same reason it is in
-    :func:`tmdc_optics_tools.hdf5.write_sweep`: the file being replaced may be the
+    :func:`leman.hdf5.write_sweep`: the file being replaced may be the
     only copy.  This is the check on its own, for writers that create their own
     parent directory — calling it before a decode is what lets a re-run refuse in
     milliseconds instead of parsing tens of MB and then refusing.
@@ -327,7 +327,7 @@ def _folder_kinds(directory, prefix=None) -> dict:
     -------
     dict
         ``{Path: kind}`` in filename order, kinds as
-        :func:`tmdc_optics_tools.loaders._classify_csv` names them.
+        :func:`leman.loaders._classify_csv` names them.
     """
     pattern = f"{prefix}*.csv" if prefix else "*.csv"
     return {f: _classify_csv(f) for f in sorted(Path(directory).glob(pattern))}
@@ -381,7 +381,7 @@ def _require_kind(path: Path, kind: str) -> None:
     ----------
     path : Path
     kind : str
-        The kind :func:`tmdc_optics_tools.loaders._classify_csv` must return, e.g.
+        The kind :func:`leman.loaders._classify_csv` must return, e.g.
         ``"image"`` or ``"spectral"``.
 
     Raises
@@ -576,8 +576,8 @@ def convert_spectral_csv_to_hdf5(
     """
     Convert a spectral export CSV to a self-describing HDF5 archive.
 
-    Loads the file with :class:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep`
-    and writes it with :func:`tmdc_optics_tools.hdf5.write_sweep`, so the result is
+    Loads the file with :class:`~leman.loaders.ACSpectralSweep`
+    and writes it with :func:`leman.hdf5.write_sweep`, so the result is
     the package's one archive format and reopens by handing the ``.h5`` back to the
     loader.  Every signal array and parameter row is stored in file units.
 
@@ -593,14 +593,14 @@ def convert_spectral_csv_to_hdf5(
     spectra_type : str
         Required, and the one measurement fact that cannot be recovered later: a
         raw export records no type and none can be inferred from the data.  One of
-        the keys of :data:`tmdc_optics_tools.constants.SPECTROSCOPY_TYPES`.
+        the keys of :data:`leman.constants.SPECTROSCOPY_TYPES`.
     out : str or Path, optional
         Destination file or directory.  Omitted, the archive lands in a
         ``converted/`` folder — see the module docstring.
     overwrite : bool
         Replace an existing archive.  Default False, which raises.
     compression : str or None
-        Passed to :func:`~tmdc_optics_tools.hdf5.write_sweep`, which applies it to
+        Passed to :func:`~leman.hdf5.write_sweep`, which applies it to
         the two spectra arrays.  ``None`` disables it.
 
     Returns
@@ -618,17 +618,17 @@ def convert_spectral_csv_to_hdf5(
     Examples
     --------
     >>> h5 = convert_spectral_csv_to_hdf5("scan/raw/sweep.csv", "PL")
-    >>> scan = AttoCubeSpectralSweep(h5, spectra_type="PL", sweep="V_A")
+    >>> scan = ACSpectralSweep(h5, spectra_type="PL", sweep="V_A")
     """
     path = Path(path)
     _require_kind(path, "spectral")
     # Validated through the loader's own resolver, against the empty metadata a raw
     # export has, so a missing or mistyped type raises the message the loader would
     # have raised — before tens of MB are parsed, and with no second copy of it.
-    AttoCubeSpectralSweep._resolve_spectra_type(spectra_type, {})
+    ACSpectralSweep._resolve_spectra_type(spectra_type, {})
     # Checked before the decode too, so a re-run refuses in milliseconds.
     target = _refuse_existing(_default_output(path, ".h5", out), overwrite)
-    scan   = AttoCubeSpectralSweep(path, spectra_type=spectra_type)
+    scan   = ACSpectralSweep(path, spectra_type=spectra_type)
     return scan.to_hdf5(target, overwrite=overwrite, compression=compression)
 
 
@@ -644,7 +644,7 @@ def convert_trpl_dir_to_hdf5(
 
     A TRPL sweep is a *directory* — one TCSPC decay per file — so this collapses
     many files into a single archive.  Which files count is
-    :class:`~tmdc_optics_tools.loaders.AttoCubeTRPLSweep`'s decision, not this
+    :class:`~leman.loaders.ACTRPLSweep`'s decision, not this
     function's: it excludes an IRF reference by name, reads a spectral-header file
     in the folder as the parameter-table companion rather than a sweep, and orders
     the rest by their ``_iter_N`` suffix.
@@ -669,7 +669,7 @@ def convert_trpl_dir_to_hdf5(
     overwrite : bool
         Replace an existing archive.  Default False, which raises.
     compression : str or None
-        Passed to :func:`~tmdc_optics_tools.hdf5.write_sweep`.
+        Passed to :func:`~leman.hdf5.write_sweep`.
 
     Returns
     -------
@@ -687,7 +687,7 @@ def convert_trpl_dir_to_hdf5(
     directory = Path(directory)
     stem      = prefix.rstrip("_- ") if prefix else directory.name
     target    = _refuse_existing(_dir_output(directory, stem, ".h5", out), overwrite)
-    scan      = AttoCubeTRPLSweep(directory, prefix=prefix)
+    scan      = ACTRPLSweep(directory, prefix=prefix)
     return scan.to_hdf5(target, overwrite=overwrite, compression=compression)
 
 
@@ -771,7 +771,7 @@ def convert_path(
         Filename prefix to select, applied in every folder.  Narrows which files
         form a TRPL sweep, and names a TIFF stack.
     compression : str or None
-        Passed to :func:`~tmdc_optics_tools.hdf5.write_sweep` for HDF5 output.
+        Passed to :func:`~leman.hdf5.write_sweep` for HDF5 output.
     from_raw : bool
         Look **upward** from *path* for the nearest folder called ``raw``, and
         mirror the tree from there into its sibling ``converted/``.  This places
