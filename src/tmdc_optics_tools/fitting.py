@@ -2883,16 +2883,20 @@ class AmplitudeScalingSegment:
     Result of a log-log linear fit of peak amplitude vs. sweep coordinate
     within one range.
 
+    The underlying model is a power law ``I = A · P^α``.  On a log-log
+    plot this is a straight line with slope *α* (the exponent) and
+    intercept ``log(A)``.
+
     Attributes
     ----------
     exponent      : float
-        Slope on the log-log plot (dimensionless).
+        Scaling exponent *α* (dimensionless).
         On a power sweep this is the power-law order
         (e.g. ~1 for excitons, ~2 for biexcitons).
     exponent_err  : float
         1-sigma uncertainty on the exponent.
     intercept     : float
-        Intercept in log space: ``log(amplitude) = exponent * log(sweep) + intercept``.
+        Intercept in log space: ``log(I) = α · log(P) + intercept``.
     intercept_err : float
         1-sigma uncertainty on the log-space intercept.
     r_squared     : float
@@ -2973,9 +2977,17 @@ def extract_amplitude_scaling(
     """
     Extract the amplitude scaling exponent from a log-log fit.
 
-    Fits ``log(peak_amplitude) = α · log(sweep_coordinate) + c`` within
-    each user-defined range.  On a power sweep the exponent *α* is the
-    power-law order (~1 for excitons, ~2 for biexcitons).
+    Assumes the peak amplitude follows a power law in the sweep
+    coordinate:
+
+        I = A · P^α
+
+    Taking the log of both sides gives a line on a log-log plot:
+
+        log(I) = α · log(P) + log(A)
+
+    The slope *α* is the scaling exponent.  On a power sweep this is
+    the power-law order (~1 for excitons, ~2 for biexcitons).
 
     Parameters
     ----------
