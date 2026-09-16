@@ -27,7 +27,7 @@ import numpy as np
 import pytest
 from matplotlib.colors import Colormap, LinearSegmentedColormap, ListedColormap
 
-from tmdc_optics_tools import plotting
+from leman import plotting
 
 try:
     from cmcrameri import cm as cmc

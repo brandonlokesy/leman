@@ -13,7 +13,7 @@ parameters -- not just that the call does not crash.
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.fitting import (
+from leman.fitting import (
     FitResult,
     classify_raman_layer,
     extract_fit_param_map,
@@ -198,7 +198,7 @@ def test_locate_residual_peak_ignores_negative_residuals():
     over_fit_curve = voigt_approx(X, amplitude=true_amp * 2, center=50.0,
                                    fwhm_g=2.0, fwhm_l=2.0)
 
-    from tmdc_optics_tools.fitting import FitResult
+    from leman.fitting import FitResult
     fake_result = FitResult(
         params={}, errors={}, x_fit=X, y_fit=over_fit_curve,
         residuals=y - over_fit_curve, r_squared=0.0, model="fake",
@@ -266,7 +266,7 @@ def test_fit_raman_modes_seed_override_follows_a_shifted_bilayer_e2g_a1g():
     ("strained_bilayer2.txt",   (250.6, 258.8, 309.1)),
 ])
 def test_fit_raman_modes_bilayer_on_the_real_reference_spectra(fname, expected):
-    from tmdc_optics_tools.loaders import RamanSpectrum
+    from leman.loaders import RamanSpectrum
 
     s = RamanSpectrum(f"{RAMAN_DIR}/{fname}")
     result = fit_raman_modes(s.shift, s.counts, material="WSe2", n_layers=2)
@@ -302,7 +302,7 @@ def test_fit_raman_modes_recovers_known_synthetic_monolayer_peaks():
     ("strained_monolayer2.txt",  (250.1, 260.5)),
 ])
 def test_fit_raman_modes_monolayer_on_the_real_reference_spectra(fname, expected):
-    from tmdc_optics_tools.loaders import RamanSpectrum
+    from leman.loaders import RamanSpectrum
 
     s = RamanSpectrum(f"{RAMAN_DIR}/{fname}")
     result = fit_raman_modes(s.shift, s.counts, material="WSe2", n_layers=1)
@@ -360,14 +360,14 @@ def test_classify_raman_layer_uses_local_baseline_not_zero():
     ("strained_monolayer2.txt", 1),
 ])
 def test_classify_raman_layer_on_the_real_reference_spectra(fname, expected):
-    from tmdc_optics_tools.loaders import RamanSpectrum
+    from leman.loaders import RamanSpectrum
 
     s = RamanSpectrum(f"{RAMAN_DIR}/{fname}")
     assert classify_raman_layer(s.shift, s.counts, material="WSe2") == expected
 
 
 def test_classify_raman_layer_on_every_pixel_of_the_real_map():
-    from tmdc_optics_tools.loaders import RamanMap
+    from leman.loaders import RamanMap
 
     m = RamanMap(f"{RAMAN_DIR}/map2.txt")
     labels = {

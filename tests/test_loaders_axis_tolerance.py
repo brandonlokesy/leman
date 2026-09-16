@@ -21,8 +21,8 @@ import warnings
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.loaders import (
-    AttoCubeSpectralSweep,
+from leman.loaders import (
+    ACSpectralSweep,
     _AXIS_MIN_MOVES,
     _AXIS_RTOL,
     _axis_atol,
@@ -166,7 +166,7 @@ def test_repeat_measurements_warn_at_load(tmp_path):
     """
     path = _repeats_csv(tmp_path / "repeats.csv")
     with pytest.warns(UserWarning) as rec:
-        AttoCubeSpectralSweep(str(path), spectra_type="PL", sweep="power")
+        ACSpectralSweep(str(path), spectra_type="PL", sweep="power")
 
     msg = "\n".join(str(w.message) for w in rec)
     assert "takes only 1 value" in msg          # singular, not "1 different values"
@@ -181,7 +181,7 @@ def test_a_coordinate_on_an_undriven_axis_is_refused(tmp_path):
     path = _repeats_csv(tmp_path / "repeats.csv")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        scan = AttoCubeSpectralSweep(str(path), spectra_type="PL", sweep="power")
+        scan = ACSpectralSweep(str(path), spectra_type="PL", sweep="power")
 
     with pytest.raises(ValueError) as exc:
         scan.get_spectrum_at(500.0)
@@ -204,7 +204,7 @@ def test_an_undriven_axis_does_not_also_warn_that_the_value_is_absent(tmp_path):
     path = _repeats_csv(tmp_path / "repeats.csv")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        scan = AttoCubeSpectralSweep(str(path), spectra_type="PL", sweep="power")
+        scan = ACSpectralSweep(str(path), spectra_type="PL", sweep="power")
 
     with pytest.warns(UserWarning) as rec:
         scan.nearest_index(500.0)
@@ -236,7 +236,7 @@ def test_a_fine_sweep_on_a_large_offset_keeps_all_its_settings(tmp_path):
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")          # no repeat warning: every point differs
-        scan = AttoCubeSpectralSweep(str(path), spectra_type="PL", sweep="V_A")
+        scan = ACSpectralSweep(str(path), spectra_type="PL", sweep="V_A")
     assert _count_distinct(scan.sweep_axis, _axis_atol(scan.sweep_axis)) == n
     # And a coordinate on it still selects one spectrum.
     assert scan.get_spectrum_at(float(volts[7])).shape == (scan.spectra.shape[0],)
@@ -252,7 +252,7 @@ def test_varying_parameters_and_the_tolerance_agree(tmp_path):
     path = _repeats_csv(tmp_path / "repeats.csv")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        scan = AttoCubeSpectralSweep(str(path), spectra_type="PL", sweep="power")
+        scan = ACSpectralSweep(str(path), spectra_type="PL", sweep="power")
 
     varying = scan.varying_parameters()
     for label, arr in scan.parameters.items():
@@ -284,7 +284,7 @@ def test_varying_parameters_reports_a_narrow_sweep_on_a_large_offset(tmp_path):
     make_spectral_csv(path, params=params)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        scan = AttoCubeSpectralSweep(str(path), spectra_type="PL")
+        scan = ACSpectralSweep(str(path), spectra_type="PL")
 
     assert "T" in scan.varying_parameters()
     # Pin that it is the second sign doing the work: the first one fails here.

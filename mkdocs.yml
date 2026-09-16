@@ -1,8 +1,8 @@
-site_name: TMDC Optics Tools
-site_description: Toolkit for gate-dependent PL spectroscopy on TMDC devices
-site_url: https://brandonlokesy.github.io/LANES-TMDC-Optics-Tools/
-repo_url: https://github.com/brandonlokesy/LANES-TMDC-Optics-Tools
-repo_name: brandonlokesy/LANES-TMDC-Optics-Tools
+site_name: Léman
+site_description: Library for Exciton and Moiré Analysis in Nanostructures
+site_url: https://brandonlokesy.github.io/leman/
+repo_url: https://github.com/brandonlokesy/leman
+repo_name: brandonlokesy/leman
 
 theme:
   name: material

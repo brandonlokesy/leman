@@ -12,7 +12,7 @@ shape checked after it.
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.loaders import RamanSpectrum
+from leman.loaders import RamanSpectrum
 
 from _paths import DATA
 

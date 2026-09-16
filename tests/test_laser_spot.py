@@ -1,5 +1,5 @@
 """
-Tests for AttoCubeLaserReferenceImage laser-spot localization.
+Tests for ACLaserRefImg laser-spot localization.
 
 Synthetic images are written to temporary CSVs (the class loads via
 ``np.loadtxt``).  We check centre/radius recovery for a clean dark-background
@@ -10,7 +10,7 @@ where the old row/column-projection fit was biased.
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.loaders import AttoCubeLaserReferenceImage
+from leman.loaders import ACLaserRefImg
 
 SHAPE = (128, 128)            # (ny, nx)
 X0, Y0 = 80.0, 50.0           # true laser centre (col, row)
@@ -49,7 +49,7 @@ def _white_light_background():
 
 def test_dark_background_recovers_centre_and_radius(tmp_path):
     img = _dark_background() + _gaussian_spot()
-    ref = AttoCubeLaserReferenceImage(
+    ref = ACLaserRefImg(
         str(_write_csv(tmp_path, img)),
         expected_radius_px=SIGMA, white_light=False,
     )
@@ -65,7 +65,7 @@ def test_dark_background_recovers_centre_and_radius(tmp_path):
 
 def test_white_light_background_recovers_centre(tmp_path):
     img = _white_light_background() + _gaussian_spot()
-    ref = AttoCubeLaserReferenceImage(
+    ref = ACLaserRefImg(
         str(_write_csv(tmp_path, img)),
         expected_radius_px=SIGMA, white_light=True,
     )
@@ -79,8 +79,8 @@ def test_white_light_off_is_biased_by_background(tmp_path):
     """Sanity check that the white-light handling actually matters here."""
     img = _white_light_background() + _gaussian_spot()
     path = str(_write_csv(tmp_path, img))
-    on = AttoCubeLaserReferenceImage(path, expected_radius_px=SIGMA, white_light=True)
-    off = AttoCubeLaserReferenceImage(path, expected_radius_px=SIGMA, white_light=False)
+    on = ACLaserRefImg(path, expected_radius_px=SIGMA, white_light=True)
+    off = ACLaserRefImg(path, expected_radius_px=SIGMA, white_light=False)
     err_on = np.hypot(on.center_x - X0, on.center_y - Y0)
     err_off = np.hypot(off.center_x - X0, off.center_y - Y0)
     assert err_on < err_off            # background suppression improves accuracy
@@ -94,7 +94,7 @@ def test_white_light_off_is_biased_by_background(tmp_path):
 
 def test_radius_scales_with_spot_size(tmp_path):
     img = _dark_background() + _gaussian_spot(sigma=10.0)
-    ref = AttoCubeLaserReferenceImage(
+    ref = ACLaserRefImg(
         str(_write_csv(tmp_path, img)),
         expected_radius_px=10.0, white_light=False,
     )
@@ -103,7 +103,7 @@ def test_radius_scales_with_spot_size(tmp_path):
 
 def test_degenerate_image_does_not_crash(tmp_path):
     img = np.full(SHAPE, 7.0)          # no spot at all
-    ref = AttoCubeLaserReferenceImage(
+    ref = ACLaserRefImg(
         str(_write_csv(tmp_path, img)), expected_radius_px=SIGMA,
     )
     # Falls back gracefully to sane, in-bounds values.

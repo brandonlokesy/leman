@@ -17,7 +17,7 @@ The measured axis is time, not wavelength — and the export names that column
 
 ### 1. A sibling class, not a mode
 
-`AttoCubeTRPLSweep` sits beside `AttoCubeSpectralSweep` over a shared private base, and
+`ACTRPLSweep` sits beside `ACSpectralSweep` over a shared private base, and
 accepts one file *or* a directory. It has **no `spectra` attribute**.
 
 ### 2. Parameters come from the data files, not the companion

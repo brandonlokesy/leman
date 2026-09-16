@@ -91,7 +91,7 @@ round trip laundering an unstated wiring into provenance.
 
 - **Channel-level work needs no declaration.** `scan["V_A"]` and `sweep="V_A"` are
   unaffected.
-- The deprecated `AttoCubePLVabScan` shim passes the historical `V_A`→top /
+- The deprecated `ACPLVabScan` shim passes the historical `V_A`→top /
   `V_B`→bottom mapping **explicitly**, so existing notebooks keep producing the numbers
   they always did. Its `FutureWarning` is what asks callers to confirm the wiring rather
   than inherit it.

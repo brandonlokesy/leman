@@ -1,4 +1,4 @@
-# src/tmdc_optics_tools/reference/processors/tagarelli2023.py
+# src/leman/reference/processors/tagarelli2023.py
 #
 # Tagarelli et al., Nature Photonics 2023
 # "Electrical control of hybrid exciton transport in a van der Waals heterostructure"

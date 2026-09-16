@@ -104,7 +104,7 @@ def signal_unit(self) -> str:
 This is not a new pattern — it is the trio the sweep axis already has
 (`sweep_label` / `sweep_unit` / `sweep_axis_label`).
 
-Also update: the `AttoCubeSpectralSweep` class docstring `Attributes` block, and
+Also update: the `ACSpectralSweep` class docstring `Attributes` block, and
 `contrast_label`'s docstring, which quotes the old `"Reflectance (counts)"`.
 
 ### Naming asymmetry, noted and deliberately not fixed
@@ -147,7 +147,7 @@ def _signal_label(scan, normalized: bool = False, source: str = None) -> str:
     physical quantity from the scan's raw signal and takes ``contrast_label``.
 
     Objects that declare no measurement type fall back to a neutral
-    "Intensity" — a :class:`~tmdc_optics_tools.loaders.SingleSpectrum` is a
+    "Intensity" — a :class:`~leman.loaders.SingleSpectrum` is a
     2-row CSV as likely to be a bare-substrate reflectance reference as PL.
     """
     if source is not None and source.startswith("contrast"):
@@ -346,7 +346,7 @@ The same argument covers `sweep_attr` itself: `sweep=` accepts any raw CSV row
 label, so "caption by Galvo_X" is already
 
 ```python
-AttoCubeSpectralSweep(path, spectra_type="PL", sweep="Galvo_X",
+ACSpectralSweep(path, spectra_type="PL", sweep="Galvo_X",
                       sweep_label=r"Galvo $x$", sweep_unit="V")
 ```
 
@@ -394,7 +394,7 @@ if x_axis == "native":
 ```
 
 which needs a matching `axis` / `axis_label` pair on both classes
-(`AttoCubeTRPLSweep.axis_label` exists; the spectral class has no `axis`).
+(`ACTRPLSweep.axis_label` exists; the spectral class has no `axis`).
 
 Deferred because it is new public surface rather than a correction, and because
 it is not useful without a lifetime fit — `fitting.py` has no exponential model.

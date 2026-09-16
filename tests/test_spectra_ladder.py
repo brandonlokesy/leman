@@ -22,9 +22,9 @@ spike was never flagged, so the first test rules that out.
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.constants import HC_EV_NM
-from tmdc_optics_tools.loaders import (
-    AttoCubeSpectralSweep,
+from leman.constants import HC_EV_NM
+from leman.loaders import (
+    ACSpectralSweep,
     SingleSpectrum,
     _resolve_spectra,
 )
@@ -66,7 +66,7 @@ def csv_path(tmp_path):
 @pytest.fixture
 def load(csv_path):
     def _load(**kwargs):
-        return AttoCubeSpectralSweep(str(csv_path), spectra_type="PL", **kwargs)
+        return ACSpectralSweep(str(csv_path), spectra_type="PL", **kwargs)
     return _load
 
 
@@ -163,7 +163,7 @@ def test_the_contrast_sits_outside_the_ladder(tmp_path, csv_path):
         ",".join(f"{w}" for w in WL) + "\n"
         + ",".join(f"{v}" for v in np.full(WL.size, 500.0)) + "\n"
     )
-    scan = AttoCubeSpectralSweep(str(csv_path), spectra_type="R",
+    scan = ACSpectralSweep(str(csv_path), spectra_type="R",
                                  reference=str(ref), cosmic_rays={})
 
     assert scan.contrast is not None and scan.energy_contrast is not None
@@ -223,7 +223,7 @@ def test_a_correction_the_class_does_not_offer_names_the_class(tmp_path):
 
 
 def test_the_jacobian_reaches_every_energy_rung_and_no_wavelength_one(load):
-    from tmdc_optics_tools.processing import jacobian_correction_wvl2E
+    from leman.processing import jacobian_correction_wvl2E
 
     on  = load(**DECLARATIONS["cr+bg"], apply_jacobian=True)
     off = load(**DECLARATIONS["cr+bg"])

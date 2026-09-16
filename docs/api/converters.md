@@ -26,7 +26,7 @@ Measured on the committed example data:
 ### One image frame
 
 ```python
-from tmdc_optics_tools import converters
+from leman import converters
 
 converters.convert_image_csv_to_tiff("scan/raw/frame_iter_0.csv")
 # -> scan/converted/frame_iter_0.tif
@@ -65,7 +65,7 @@ converters.convert_trpl_dir_to_hdf5("trpl-sweep", prefix="TRPL_")
 # -> converted/trpl.h5
 ```
 
-No type argument: `AttoCubeTRPLSweep` defaults it to `"TRPL"`, the class name
+No type argument: `ACTRPLSweep` defaults it to `"TRPL"`, the class name
 having already declared the modality.
 
 ### A file, a folder, or a whole tree
@@ -80,8 +80,8 @@ a sweep. Call a single-purpose converter directly to get the exception instead.
 
 ## Reading an archive back
 
-The HDF5 side owns no format. It loads with `AttoCubeSpectralSweep` or
-`AttoCubeTRPLSweep` and writes with [`write_sweep`](hdf5.md), so an archive reopens
+The HDF5 side owns no format. It loads with `ACSpectralSweep` or
+`ACTRPLSweep` and writes with [`write_sweep`](hdf5.md), so an archive reopens
 by handing the `.h5` straight back to its loader.
 
 Only the measurement *type* is stored at conversion time. What was swept, which
@@ -90,7 +90,7 @@ archive — the loader takes each from its argument and only falls back to what 
 file recorded:
 
 ```python
-scan = AttoCubeSpectralSweep(
+scan = ACSpectralSweep(
     "scan/converted/sweep.h5", spectra_type="PL",
     sweep="electric_field",
     gates={"top": "V_A", "bottom": "V_B"},
@@ -412,4 +412,4 @@ Pixel type for images follows the data. `"auto"` keeps integer counts exactly �
 `uint16` up to 65535, `uint32` above — and falls back to `float32` for anything
 else, which is a narrowing from the `float64` the CSV is read as.
 
-::: tmdc_optics_tools.converters
+::: leman.converters

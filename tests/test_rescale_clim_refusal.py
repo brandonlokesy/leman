@@ -20,8 +20,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import plotting
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep
+from leman import plotting
+from leman.loaders import ACSpectralSweep
 
 from test_loaders import make_spectral_csv
 
@@ -33,7 +33,7 @@ CLIM = (500.0, 1500.0)
 def scan(tmp_path):
     path = tmp_path / "scan.csv"
     make_spectral_csv(path)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    return ACSpectralSweep(str(path), spectra_type="PL")
 
 
 @pytest.fixture(autouse=True)

@@ -22,11 +22,11 @@ loader, rather than called directly.
     than paths, so a contrast can still be rebuilt from the archive alone:
 
     ```python
-    back = AttoCubeSpectralSweep("scan.h5", spectra_type="R")
-    again = AttoCubeSpectralSweep(
+    back = ACSpectralSweep("scan.h5", spectra_type="R")
+    again = ACSpectralSweep(
         "scan.h5", spectra_type="R",
         reference=back.source_metadata["reference"],
     )
     ```
 
-::: tmdc_optics_tools.hdf5
+::: leman.hdf5

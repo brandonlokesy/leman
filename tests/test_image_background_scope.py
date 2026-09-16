@@ -1,7 +1,7 @@
 """
 Which single-image classes accept a background region, and which refuse one.
 
-``_AttoCubeImage`` builds ``img`` and so is where ``bg_region`` / ``bg_stat``
+``_ACImg`` builds ``img`` and so is where ``bg_region`` / ``bg_stat``
 live, but that is a fact about where the array is assembled, not a claim that
 every kind of image wants a pedestal removed.  The scope is deliberate:
 
@@ -20,9 +20,9 @@ base's parameters and hand back the knob, and no other test would notice.
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.loaders import (
-    AttoCubePLImage,
-    AttoCubeSampleImage,
+from leman.loaders import (
+    ACImg,
+    ACSampleImg,
     SingleImage,
 )
 
@@ -43,7 +43,7 @@ def _image_csv(tmp_path, name="frame.csv"):
 
 
 def test_a_pl_frame_takes_a_background_region(tmp_path):
-    image = AttoCubePLImage(_image_csv(tmp_path), bg_region=BG_REGION)
+    image = ACImg(_image_csv(tmp_path), bg_region=BG_REGION)
 
     assert image.bg_region == BG_REGION
     assert np.allclose(image.img.max(), SIGNAL_FILL - BG_MEDIAN)
@@ -51,13 +51,13 @@ def test_a_pl_frame_takes_a_background_region(tmp_path):
     assert np.allclose(image.img_raw.max(), SIGNAL_FILL)
 
 
-@pytest.mark.parametrize("cls", [AttoCubeSampleImage, SingleImage])
+@pytest.mark.parametrize("cls", [ACSampleImg, SingleImage])
 def test_the_classes_that_refuse_one_refuse_it_at_the_signature(cls, tmp_path):
     with pytest.raises(TypeError, match="bg_region"):
         cls(_image_csv(tmp_path), bg_region=BG_REGION)
 
 
-@pytest.mark.parametrize("cls", [AttoCubeSampleImage, SingleImage])
+@pytest.mark.parametrize("cls", [ACSampleImg, SingleImage])
 def test_a_refusing_class_still_carries_the_attribute_as_none(cls, tmp_path):
     """
     The base assigns ``bg_region``, so the attribute exists either way and is

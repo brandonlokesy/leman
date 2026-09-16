@@ -1,4 +1,4 @@
-# tmdc_optics_tools/loaders.py
+# leman/loaders.py
 """
 Data loaders and device geometry for TMD heterostructure measurements.
 
@@ -6,13 +6,13 @@ Classes
 -------
 DeviceGeometry
     Encodes the physical geometry and dielectric constants of a vdW stack.
-AttoCubeSpectralSweep
+ACSpectralSweep
     A sweep of spectra taken on the AttoCube cryogenic confocal — any
     measurement type, over any scanned parameter.  Reads the raw CSV export or
-    an HDF5 file written by its own :meth:`AttoCubeSpectralSweep.to_hdf5`.
-AttoCubePLVabScan
+    an HDF5 file written by its own :meth:`ACSpectralSweep.to_hdf5`.
+ACPLVabScan
     Deprecated pre-rename name for the above, fixed to PL gate sweeps.
-BigTableSpectralSweep
+BTSpectralSweep
     The same, on the BigTable setup — a headerless export whose parameter
     rows are positional and whose signal column is written twice.
 SingleSpectrum
@@ -21,14 +21,14 @@ RamanSpectrum
     Single Raman spectrum from a LabRAM-style ``.txt`` export.
 RamanMap
     2-D spatial Raman map from a LabRAM-style ``.txt`` export.
-AttoCubePLScanRealSpace
+ACImgSweep
     Loads a sequence of real-space PL image CSVs swept over gate voltage.
-_AttoCubeImage
-    Internal base class shared by AttoCubeSampleImage and
-    AttoCubeLaserReferenceImage.
-AttoCubeSampleImage
+_ACImg
+    Internal base class shared by ACSampleImg and
+    ACLaserRefImg.
+ACSampleImg
     White-light reference image of the sample.
-AttoCubeLaserReferenceImage
+ACLaserRefImg
     Laser-spot reference image with fitted 1/e² radius.
 """
 
@@ -86,10 +86,10 @@ class StackLayer:
         Number of monolayers of this material.  Default 1.
     d_monolayer : float, optional
         Monolayer thickness in **nm**.  If ``None``, looked up from
-        :data:`~tmdc_optics_tools.constants.T_MONOLAYER`.
+        :data:`~leman.constants.T_MONOLAYER`.
     eps : float, optional
         Out-of-plane dielectric constant.  If ``None``, looked up from
-        :data:`~tmdc_optics_tools.constants.EPS_TMDC`.
+        :data:`~leman.constants.EPS_TMDC`.
 
     Examples
     --------
@@ -163,7 +163,7 @@ class DeviceGeometry:
         Bottom hBN thickness in nm.  Pass ``None`` likewise.
     eps_hbn : float
         Out-of-plane hBN dielectric constant.  Defaults to
-        :data:`~tmdc_optics_tools.constants.EPS_HBN`.
+        :data:`~leman.constants.EPS_HBN`.
     label : str, optional
         Human-readable description of the stack, e.g.
         ``"hBN/MoSe2/WSe2/hBN"``.  For record-keeping only.
@@ -382,7 +382,7 @@ class DeviceGeometry:
 
         This accounts for only TMDC layers in the stack with their individual thicknesses and dielectric
         constants.  For a stack of a single material it returns that material's
-        :data:`~tmdc_optics_tools.constants.EPS_TMDC` value unchanged; it only
+        :data:`~leman.constants.EPS_TMDC` value unchanged; it only
         does work for a genuine heterostructure.
 
         See Also
@@ -921,7 +921,7 @@ def _resolve_spectra(scan, spectra_source: str, x_axis: str) -> np.ndarray:
     only.
 
     Reads *scan* by attribute name, so it serves anything mirroring
-    :class:`AttoCubeSpectralSweep`, and distinguishes a correction the class does
+    :class:`ACSpectralSweep`, and distinguishes a correction the class does
     not offer from one that was simply not requested.
 
     Raises ``ValueError`` when *x_axis* names no spectral axis, when the source is
@@ -1004,7 +1004,7 @@ def _resolve_frame(scan, idx: int, frame_source: str = "best") -> np.ndarray:
 
     Parameters
     ----------
-    scan : AttoCubePLScanRealSpace or object exposing ``load_frame(idx)``
+    scan : ACImgSweep or object exposing ``load_frame(idx)``
     idx : int
         Frame index.
     frame_source : {``"best"``, ``"raw"``, ``"bg"``}
@@ -1074,8 +1074,8 @@ _BLOCK_LAYOUTS = {
 # sits above their definitions; used only to point a mis-aimed load at the right
 # class by name.
 _CLASS_FOR_KIND = {
-    "spectral": "AttoCubeSpectralSweep",
-    "temporal": "AttoCubeTRPLSweep",
+    "spectral": "ACSpectralSweep",
+    "temporal": "ACTRPLSweep",
 }
 
 # Trailing digits, with or without a separating underscore: "Par_0" -> "Par",
@@ -1167,14 +1167,14 @@ def _read_block_layout(path) -> dict:
         elif len(names) % 4 == 0:
             shape, better = (
                 f"more than two rows and {len(names)} columns",
-                "BigTableSpectralSweep, which reads a headerless export of "
-                "4-column blocks, or AttoCubePLScanRealSpace / SingleImage if "
+                "BTSpectralSweep, which reads a headerless export of "
+                "4-column blocks, or ACImgSweep / SingleImage if "
                 "it is a real-space image",
             )
         else:
             shape, better = (
                 "more than two rows",
-                "AttoCubePLScanRealSpace, which reads a directory of these as an "
+                "ACImgSweep, which reads a directory of these as an "
                 "image sequence, or SingleImage for one frame",
             )
         raise ValueError(
@@ -1850,8 +1850,8 @@ class _Sweep:
     """
     Shared machinery for a parameter sweep, whatever the measured axis.
 
-    Not constructed directly — see :class:`AttoCubeSpectralSweep` (wavelength /
-    energy) and :class:`AttoCubeTRPLSweep` (time).  Everything here is
+    Not constructed directly — see :class:`ACSpectralSweep` (wavelength /
+    energy) and :class:`ACTRPLSweep` (time).  Everything here is
     independent of what the spectral axis *is*: the parameter store, the curated
     registry, sweep-axis resolution, measurement-type metadata, and HDF5 export.
 
@@ -2048,7 +2048,7 @@ class _Sweep:
                 f"__repr__ line and legend entry, so it is a misread otherwise.",
                 # Measured, not counted off def lines: 1 is here, 2 is the
                 # constructor that called this, 3 is the researcher's own line.
-                # AttoCubePLVabScan adds a frame and so points at its own
+                # ACPLVabScan adds a frame and so points at its own
                 # super().__init__ instead; it is deprecated, and its comment
                 # there says so.  This is a new site, not one of A11's fifteen.
                 UserWarning, stacklevel=3,
@@ -3206,7 +3206,7 @@ class _Sweep:
 
         See Also
         --------
-        tmdc_optics_tools.processing.reorder_grid : flatten a grid built by
+        leman.processing.reorder_grid : flatten a grid built by
             this method back into a sequence, in a chosen traversal order
             and direction rather than only the one it was written in.
         """
@@ -3237,8 +3237,8 @@ class _Sweep:
         Parameters
         ----------
         image_scan : object exposing ``n_frames`` and ``load_frame(idx)``
-            E.g. :class:`AttoCubePLScanRealSpace`, or anything else
-            :class:`~tmdc_optics_tools.plotting.ImageSequencePanel` accepts.
+            E.g. :class:`ACImgSweep`, or anything else
+            :class:`~leman.plotting.ImageSequencePanel` accepts.
 
         Returns
         -------
@@ -3754,7 +3754,7 @@ class _Sweep:
         """
         Write this sweep to a self-describing HDF5 file.
 
-        Thin delegation to :func:`tmdc_optics_tools.hdf5.write_sweep`; see there
+        Thin delegation to :func:`leman.hdf5.write_sweep`; see there
         for the layout and for what is deliberately *not* stored.
 
         Parameters
@@ -3762,7 +3762,7 @@ class _Sweep:
         path : str or Path
             Destination ``.h5`` file.
         **kwargs
-            Forwarded to :func:`~tmdc_optics_tools.hdf5.write_sweep`
+            Forwarded to :func:`~leman.hdf5.write_sweep`
             (``compression``, ``overwrite``).
 
         Returns
@@ -4276,7 +4276,7 @@ class _SpectralSweep(_Sweep):
         a different quantity rather than a better-corrected one, and it is
         negative-going, which peak fits and intensity colour bars both misread.
         Use :attr:`energy_contrast`, or ``spectra_source="contrast"`` in
-        :mod:`~tmdc_optics_tools.plotting`.
+        :mod:`~leman.plotting`.
         """
         for rung in (self.energy_spectra_bg, self.energy_spectra_cr):
             if rung is not None:
@@ -4525,11 +4525,11 @@ class _SpectralSweep(_Sweep):
 
 
 # ---------------------------------------------------------------------------
-# AttoCubeSpectralSweep
+# ACSpectralSweep
 # ---------------------------------------------------------------------------
 
 
-class AttoCubeSpectralSweep(_SpectralSweep):
+class ACSpectralSweep(_SpectralSweep):
     """
     A sweep of spectra from the AttoCube cryogenic confocal.
 
@@ -4564,7 +4564,7 @@ class AttoCubeSpectralSweep(_SpectralSweep):
         Path to the ``.csv`` or ``.h5`` file.
     spectra_type : str
         What the spectra *are*, one of
-        :data:`~tmdc_optics_tools.constants.SPECTROSCOPY_TYPES`
+        :data:`~leman.constants.SPECTROSCOPY_TYPES`
         (``"PL"``, ``"R"``, ``"RC"``, ``"T"``, ``"A"``, ``"TRPL"``).
         Required for CSV input; optional when reading HDF5, where it is taken
         from the file unless given (a mismatch warns and the argument wins).
@@ -4642,7 +4642,7 @@ class AttoCubeSpectralSweep(_SpectralSweep):
         raises.
     cosmic_rays : dict, optional
         Opts into cosmic-ray repair, and carries the keyword arguments forwarded
-        to :func:`~tmdc_optics_tools.processing.remove_cosmic_rays` — e.g.
+        to :func:`~leman.processing.remove_cosmic_rays` — e.g.
         ``{"sigma_threshold": 4.0}``, or ``{}`` to accept that function's
         defaults.  ``None`` (default) leaves the counts alone.  An unknown key
         raises; ``spectra`` and ``axis`` are not accepted, being the array this
@@ -4688,7 +4688,7 @@ class AttoCubeSpectralSweep(_SpectralSweep):
         supplying the ratio here, is the caller's responsibility.
     contrast : {"contrast", "ratio"}
         Which contrast to form when *reference* is given — ``(S − R)/R`` or
-        ``S/R``.  See :func:`~tmdc_optics_tools.processing.spectral_contrast`.
+        ``S/R``.  See :func:`~leman.processing.spectral_contrast`.
     apply_jacobian : bool
         If ``True``, the Jacobian correction ``dλ/dE = λ²/(hc)`` is applied
         when building the energy-axis spectra, so integrated intensity is
@@ -4942,7 +4942,7 @@ class AttoCubeSpectralSweep(_SpectralSweep):
     **A displacement-field PL sweep.**  The field's sign depends on which channel
     reached which electrode, so that mapping is stated rather than assumed:
 
-    >>> scan = AttoCubeSpectralSweep(
+    >>> scan = ACSpectralSweep(
     ...     "myscan.csv", spectra_type="PL",
     ...     sweep="electric_field", geometry=geom,
     ...     gates={"top": "V_A", "bottom": "V_B"},
@@ -4952,19 +4952,19 @@ class AttoCubeSpectralSweep(_SpectralSweep):
 
     **A power series and a piezo line-scan — same class, same file layout:**
 
-    >>> pwr  = AttoCubeSpectralSweep("power.csv", spectra_type="PL", sweep="power")
-    >>> line = AttoCubeSpectralSweep("line.csv",  spectra_type="PL", sweep="piezo_y")
+    >>> pwr  = ACSpectralSweep("power.csv", spectra_type="PL", sweep="power")
+    >>> line = ACSpectralSweep("line.csv",  spectra_type="PL", sweep="piezo_y")
 
     **Don't know what was swept?  Load it and ask:**
 
-    >>> scan = AttoCubeSpectralSweep("unknown.csv", spectra_type="PL")
+    >>> scan = ACSpectralSweep("unknown.csv", spectra_type="PL")
     >>> scan.varying_parameters()             # {'V_A': (0.0, 1.0, 1.0), ...}
     >>> scan.gate_mode
     'dual-gate, anti-correlated (field-like)'
 
     **The same device rewired the other way round**, which mirrors the field axis:
 
-    >>> scan = AttoCubeSpectralSweep(
+    >>> scan = ACSpectralSweep(
     ...     "myscan.csv", spectra_type="PL", sweep="electric_field",
     ...     geometry=geom, gates={"top": "V_B", "bottom": "V_A"},
     ... )
@@ -4972,7 +4972,7 @@ class AttoCubeSpectralSweep(_SpectralSweep):
     **A bottom-gated device with the TMDC contacted** — a doping sweep.  One gate
     is one degree of freedom, so ``ef`` and ``v_top`` raise; sweep the gate itself:
 
-    >>> scan = AttoCubeSpectralSweep(
+    >>> scan = ACSpectralSweep(
     ...     "doping.csv", spectra_type="PL", sweep="bottom_voltage",
     ...     gates={"bottom": "V_A", "channel": "V_B"},
     ... )
@@ -4984,7 +4984,7 @@ class AttoCubeSpectralSweep(_SpectralSweep):
     **The same sweep on a density axis**, which is what one gate controls:
 
     >>> bottom = DeviceGeometry.from_single("WSe2", d_hbn_bottom=46)
-    >>> scan = AttoCubeSpectralSweep(
+    >>> scan = ACSpectralSweep(
     ...     "doping.csv", spectra_type="PL", sweep="carrier_density",
     ...     geometry=bottom, gates={"bottom": "V_A", "channel": "V_B"},
     ... )
@@ -4996,22 +4996,22 @@ class AttoCubeSpectralSweep(_SpectralSweep):
     >>> scan.parameter_labels                 # ['Excitation Power', 'Galvo_X', ...]
     >>> scan.get_parameter("Scanner X")       # (n_sweeps,) raw units
     >>> scan["Galvo_Y"]                       # sugar for get_parameter
-    >>> AttoCubeSpectralSweep("s.csv", spectra_type="PL",
+    >>> ACSpectralSweep("s.csv", spectra_type="PL",
     ...                       sweep="Galvo_Y", sweep_unit="V")
 
     **Corrections, and a round trip through HDF5:**
 
-    >>> scan = AttoCubeSpectralSweep(
+    >>> scan = ACSpectralSweep(
     ...     "myscan.csv", spectra_type="PL", sweep="electric_field",
     ...     geometry=geom, gates={"top": "V_A", "bottom": "V_B"},
     ...     bg_region_eV=(1.28, 1.32), apply_jacobian=True,
     ... )
     >>> scan.to_hdf5("myscan.h5")
-    >>> again = AttoCubeSpectralSweep("myscan.h5")   # type, sweep, geometry, gates restored
+    >>> again = ACSpectralSweep("myscan.h5")   # type, sweep, geometry, gates restored
 
     See Also
     --------
-    tmdc_optics_tools.hdf5 : the export/import format, and what it stores.
+    leman.hdf5 : the export/import format, and what it stores.
     """
 
     # One sweep point per 4-column block: [Par, Wavelength, ExpROI1, ExpROI2].
@@ -5020,7 +5020,7 @@ class AttoCubeSpectralSweep(_SpectralSweep):
     _LAYOUT_KIND = "spectral"
 
     # Which rows this instrument writes, and which of them pair a bias with a
-    # current.  Shared with AttoCubeTRPLSweep: one system, one pair of tables.
+    # current.  Shared with ACTRPLSweep: one system, one pair of tables.
     _CURATED         = _ATTOCUBE_CURATED
     _SIBLING_CURRENT = _ATTOCUBE_SIBLING_CURRENT
 
@@ -5170,7 +5170,7 @@ class AttoCubeSpectralSweep(_SpectralSweep):
                 f"'{self.path}' declares {self.n_declared_sweeps} sweep point(s) "
                 f"but contains no spectra — every block is zero-filled. This is "
                 f"the metadata companion written alongside a TRPL sweep, not a "
-                f"spectral export. Point AttoCubeTRPLSweep at the directory "
+                f"spectral export. Point ACTRPLSweep at the directory "
                 f"instead; it reads this file for cross-checking."
             )
         self._validate_axis_and_signals(
@@ -5219,12 +5219,12 @@ class AttoCubeSpectralSweep(_SpectralSweep):
 
 
 # ---------------------------------------------------------------------------
-# AttoCubePLVabScan — deprecated pre-rename name
+# ACPLVabScan — deprecated pre-rename name
 # ---------------------------------------------------------------------------
 
-class AttoCubePLVabScan(AttoCubeSpectralSweep):
+class ACPLVabScan(ACSpectralSweep):
     """
-    Deprecated alias for :class:`AttoCubeSpectralSweep`, PL gate sweeps only.
+    Deprecated alias for :class:`ACSpectralSweep`, PL gate sweeps only.
 
     Reproduces the pre-rename behaviour exactly: ``spectra_type="PL"``, and a
     sweep axis of displacement field when a :class:`DeviceGeometry` is supplied,
@@ -5234,11 +5234,11 @@ class AttoCubePLVabScan(AttoCubeSpectralSweep):
 
     Assumes ``V_A`` drove the top gate and ``V_B`` the bottom unless
     *top_gate_label* / *bot_gate_label* say otherwise. That assumption is what
-    :class:`AttoCubeSpectralSweep` refuses to make; it survives here only so that
+    :class:`ACSpectralSweep` refuses to make; it survives here only so that
     existing scripts keep running unchanged.
 
     .. deprecated::
-       Use :class:`AttoCubeSpectralSweep` with an explicit ``spectra_type=`` and
+       Use :class:`ACSpectralSweep` with an explicit ``spectra_type=`` and
        ``sweep=``.  This subclass exists so that existing notebooks and scripts
        keep running; it adds no behaviour of its own.
 
@@ -5263,9 +5263,9 @@ class AttoCubePLVabScan(AttoCubeSpectralSweep):
         roi             : int   = 1,
     ):
         warnings.warn(
-            "AttoCubePLVabScan is deprecated; use AttoCubeSpectralSweep with an "
+            "ACPLVabScan is deprecated; use ACSpectralSweep with an "
             "explicit spectra_type= and sweep=, e.g. "
-            "AttoCubeSpectralSweep(path, spectra_type='PL', "
+            "ACSpectralSweep(path, spectra_type='PL', "
             "sweep='electric_field', geometry=geom).",
             FutureWarning, stacklevel=2,
         )
@@ -5305,11 +5305,11 @@ class AttoCubePLVabScan(AttoCubeSpectralSweep):
 
 
 # ---------------------------------------------------------------------------
-# BigTableSpectralSweep
+# BTSpectralSweep
 # ---------------------------------------------------------------------------
 
 
-class BigTableSpectralSweep(_SpectralSweep):
+class BTSpectralSweep(_SpectralSweep):
     """
     A sweep of spectra from the BigTable setup.
 
@@ -5317,7 +5317,7 @@ class BigTableSpectralSweep(_SpectralSweep):
     per sweep point, ``[parameter, wavelength, signal, signal]``, with the first
     line already data. Every correction, both spectral axes, the gate vocabulary,
     the sweep axis and the nest machinery behave exactly as they do for
-    :class:`AttoCubeSpectralSweep`, which documents them in full.
+    :class:`ACSpectralSweep`, which documents them in full.
 
     Three things are specific to this instrument.
 
@@ -5349,7 +5349,7 @@ class BigTableSpectralSweep(_SpectralSweep):
     spectra_type : str
         What was measured, e.g. ``"PL"``. Required and keyword-only: a raw export
         records nothing, and a default would be a guess that outlives the
-        session. One of :data:`~tmdc_optics_tools.constants.SPECTROSCOPY_TYPES`.
+        session. One of :data:`~leman.constants.SPECTROSCOPY_TYPES`.
     sweep : str, optional
         What was scanned. Either a registry key (``"electric_field"``,
         ``"carrier_density"``, ``"top_voltage"``, ``"bottom_voltage"``,
@@ -5376,7 +5376,7 @@ class BigTableSpectralSweep(_SpectralSweep):
         role-dependent quantity refuses until it is declared. A grounded
         electrode is declared as ``None``.
     cosmic_rays : dict, optional
-        Forwarded to :func:`~tmdc_optics_tools.processing.remove_cosmic_rays`.
+        Forwarded to :func:`~leman.processing.remove_cosmic_rays`.
         ``{}`` accepts every default; ``None`` leaves the repair off.
     bg_region_nm, bg_region_eV : tuple, optional
         Window whose mean is subtracted as a pedestal. At most one.
@@ -5418,13 +5418,13 @@ class BigTableSpectralSweep(_SpectralSweep):
 
     See Also
     --------
-    AttoCubeSpectralSweep : the same machinery, reading the headed AttoCube
+    ACSpectralSweep : the same machinery, reading the headed AttoCube
         export; its docstring documents the shared parameters and the correction
         ladder in full.
 
     Examples
     --------
-    >>> scan = BigTableSpectralSweep(          # doctest: +SKIP
+    >>> scan = BTSpectralSweep(          # doctest: +SKIP
     ...     "PL_Ez_1LWSe2_p20uW_exp1sec_250508_190009.csv",
     ...     spectra_type = "PL",
     ...     gates        = {"top": "Gate Voltage 2",
@@ -5618,7 +5618,7 @@ class BigTableSpectralSweep(_SpectralSweep):
                 f"[{', '.join(cls._BLOCK_ROLES)}] blocks, so it is not a "
                 f"BigTable spectral export. A bare numeric grid of any width is "
                 f"a real-space image: read a directory of them with "
-                f"AttoCubePLScanRealSpace, or one frame with SingleImage."
+                f"ACImgSweep, or one frame with SingleImage."
             )
 
     @classmethod
@@ -5665,7 +5665,7 @@ class BigTableSpectralSweep(_SpectralSweep):
                 f"field of every block holds the same wavelength axis. A bare "
                 f"numeric grid whose width happens to divide by four is far "
                 f"more likely a real-space image: read a directory of them with "
-                f"AttoCubePLScanRealSpace, or one frame with SingleImage."
+                f"ACImgSweep, or one frame with SingleImage."
             )
 
     @classmethod
@@ -5694,7 +5694,7 @@ class BigTableSpectralSweep(_SpectralSweep):
                 f"scan.",
                 # 7, measured rather than counted off the def lines. The chain
                 # is caller -> __init__ -> _decode_and_describe ->
-                # BigTableSpectralSweep._decode -> _Sweep._decode ->
+                # BTSpectralSweep._decode -> _Sweep._decode ->
                 # _decode_csv -> here. The easy-to-miss frame is this class's
                 # own _decode override, which refuses .h5 and then delegates.
                 UserWarning, stacklevel=7,
@@ -5796,7 +5796,7 @@ class BigTableSpectralSweep(_SpectralSweep):
 
 
 # ---------------------------------------------------------------------------
-# AttoCubeTRPLSweep
+# ACTRPLSweep
 # ---------------------------------------------------------------------------
 
 # The TRPL export's time axis. 4 ps bins over ~12.8 ns, consistent with the
@@ -5805,7 +5805,7 @@ class BigTableSpectralSweep(_SpectralSweep):
 _TRPL_TIME_UNIT = "ns"
 
 
-class AttoCubeTRPLSweep(_Sweep):
+class ACTRPLSweep(_Sweep):
     """
     Time-resolved PL from the AttoCube cryogenic confocal.
 
@@ -5817,7 +5817,7 @@ class AttoCubeTRPLSweep(_Sweep):
     *named* "Wavelength" actually holds **time**: an acquisition-software
     misnomer that this class reads as time and exposes as :attr:`time`.
 
-    Why this is a separate class from :class:`AttoCubeSpectralSweep` rather than a
+    Why this is a separate class from :class:`ACSpectralSweep` rather than a
     mode of it: a single decay is simply ``n_sweeps == 1``, which the sweep
     machinery already handles, so that is not the dividing line.  The axis is.
     ``energy = hc/t`` is meaningless and divides by zero at ``t = 0``, so
@@ -5835,14 +5835,14 @@ class AttoCubeTRPLSweep(_Sweep):
         (default) considers every ``.csv`` and classifies by content.
     spectra_type : str
         Defaults to ``"TRPL"``.  Deliberately unlike
-        :class:`AttoCubeSpectralSweep`, which requires an explicit type: the
+        :class:`ACSpectralSweep`, which requires an explicit type: the
         class name already declares the modality here, whereas a spectral sweep
         may be PL, R, RC, T or A and cannot know which.
     sweep, sweep_label, sweep_unit : str, optional
-        As :class:`AttoCubeSpectralSweep`.  A gate sweep needs a *geometry* for
+        As :class:`ACSpectralSweep`.  A gate sweep needs a *geometry* for
         ``"electric_field"``, and *gates* for any of the three.
     fast_sweep, slow_sweep, n_fast, n_slow, fast_group_by, slow_group_by : optional
-        As :class:`AttoCubeSpectralSweep`: declare a 2-D nest, optionally assert its
+        As :class:`ACSpectralSweep`: declare a 2-D nest, optionally assert its
         shape, and optionally group its levels from a different row than the one
         labelled.  :meth:`as_grid` reshapes :attr:`decays` onto it.  No nested TRPL
         sweep has been seen, so this is untested against a real file.
@@ -5854,12 +5854,12 @@ class AttoCubeTRPLSweep(_Sweep):
     gates : dict, optional
         Which parameter row reached each electrode, e.g.
         ``{"top": "V_A", "bottom": "V_B"}``.  As
-        :class:`AttoCubeSpectralSweep` — the roles present describe the device, and
+        :class:`ACSpectralSweep` — the roles present describe the device, and
         the declaration is required for :attr:`v_top`, :attr:`v_bot`,
         :attr:`v_channel`, :attr:`ef` and the gate sweep types.
     curated_labels, curated_scales, curated_units : dict, optional
         Override which row backs a curated attribute, its scale, and its unit.
-        As :class:`AttoCubeSpectralSweep`, and keyed by the same curated attribute
+        As :class:`ACSpectralSweep`, and keyed by the same curated attribute
         names — which here include the three Picoharp rows added by this class.
         Two of those carry a unit this package has not confirmed (``"Hz?"``,
         ``"s?"``); *curated_units* is where a confirmed one is stated, so the
@@ -5888,7 +5888,7 @@ class AttoCubeTRPLSweep(_Sweep):
     irf_files : list of str
         Names of candidate files excluded from the sweep because "irf"
         appears in their filename — never a data point or companion, load
-        one on its own via a separate ``AttoCubeTRPLSweep(irf_path)``. Empty
+        one on its own via a separate ``ACTRPLSweep(irf_path)``. Empty
         for a single-file load.
     declared_parameters : dict or None
         The companion's own parameter table, one value per declared sweep point.
@@ -5909,12 +5909,12 @@ class AttoCubeTRPLSweep(_Sweep):
 
     Examples
     --------
-    >>> decay = AttoCubeTRPLSweep("TRPL_..._iter_0.csv")     # one decay
+    >>> decay = ACTRPLSweep("TRPL_..._iter_0.csv")     # one decay
     >>> decay.n_sweeps
     1
 
     >>> geom  = DeviceGeometry.from_single("WSe2", d_hbn_top=53, d_hbn_bottom=46)
-    >>> sweep = AttoCubeTRPLSweep(
+    >>> sweep = ACTRPLSweep(
     ...     "examples/data/TRPL/", sweep="electric_field", geometry=geom,
     ...     gates={"top": "V_A", "bottom": "V_B"}, bg_region_ns=(0.0, 1.0),
     ... )
@@ -6053,7 +6053,7 @@ class AttoCubeTRPLSweep(_Sweep):
         its **name** says it is not a sweep point. Any candidate with "irf" in
         its filename (case-insensitive) is therefore excluded here regardless
         of *prefix* — it is never a data point or a companion, only ever an
-        IRF, loaded on its own via a separate ``AttoCubeTRPLSweep(irf_path)``.
+        IRF, loaded on its own via a separate ``ACTRPLSweep(irf_path)``.
         """
         pattern    = f"{self._prefix or ''}*.csv"
         candidates = sorted(Path(path).glob(pattern))
@@ -6222,7 +6222,7 @@ class AttoCubeTRPLSweep(_Sweep):
         Pre-pulse-subtracted decays when available, else the raw counts.
 
         The temporal counterpart of
-        :attr:`AttoCubeSpectralSweep.best_energy_spectra`.
+        :attr:`ACSpectralSweep.best_energy_spectra`.
         """
         return self.decays_bg if self.decays_bg is not None else self.decays
 
@@ -6263,9 +6263,9 @@ class SingleSpectrum:
     * **Row 0** : wavelength axis in nm (ascending).
     * **Row 1** : counts (PL intensity).
 
-    Attribute names mirror :class:`AttoCubeSpectralSweep` so the same plotting
-    helpers (e.g. :func:`~tmdc_optics_tools.plotting.plot_single_spectrum`,
-    :func:`~tmdc_optics_tools.plotting._resolve_x_axis`) work unchanged.
+    Attribute names mirror :class:`ACSpectralSweep` so the same plotting
+    helpers (e.g. :func:`~leman.plotting.plot_single_spectrum`,
+    :func:`~leman.plotting._resolve_x_axis`) work unchanged.
 
     Parameters
     ----------
@@ -6710,7 +6710,7 @@ class RamanMap:
 
 
 # ---------------------------------------------------------------------------
-# AttoCubePLScanRealSpace
+# ACImgSweep
 # ---------------------------------------------------------------------------
 
 # Rows a bare numeric grid needs before it counts as a frame.  Two rows is a
@@ -6798,7 +6798,7 @@ def _classify_csv(path: Path) -> str:
         return "unrecognised"
 
 
-class AttoCubePLScanRealSpace:
+class ACImgSweep:
     """
     Loader for a gate-dependent sequence of real-space PL images from the
     AttoCube cryogenic confocal.
@@ -6823,7 +6823,7 @@ class AttoCubePLScanRealSpace:
     geometry : DeviceGeometry, optional
         Device geometry. Stored for reference but not currently used to
         compute a field axis (gate voltages are not embedded in these files).
-    laser_ref : AttoCubeLaserReferenceImage, optional
+    laser_ref : ACLaserRefImg, optional
         Laser spot reference, used for annotation in animations.
     bg_region : tuple of (row_slice, col_slice), optional
         Pixel-space patch of signal-free detector used to estimate a dark
@@ -6840,7 +6840,7 @@ class AttoCubePLScanRealSpace:
         path      : str,
         prefix    : str,
         geometry  : DeviceGeometry = None,
-        laser_ref : "AttoCubeLaserReferenceImage" = None,
+        laser_ref : "ACLaserRefImg" = None,
         bg_region : tuple = None,
         bg_stat   : str   = "median",
     ):
@@ -6965,7 +6965,7 @@ class AttoCubePLScanRealSpace:
 # Shared base for single-image classes
 # ---------------------------------------------------------------------------
 
-class _AttoCubeImage:
+class _ACImg:
     """
     Base class for single grayscale images loaded from a CSV.
 
@@ -6973,7 +6973,7 @@ class _AttoCubeImage:
     circle annotation logic so subclasses do not duplicate it.
     """
 
-    def __init__(self, path: str, laser_ref: "AttoCubeLaserReferenceImage" = None, bg_region : tuple = None, bg_stat : str = "median"):
+    def __init__(self, path: str, laser_ref: "ACLaserRefImg" = None, bg_region : tuple = None, bg_stat : str = "median"):
         self.path      = str(path)
         self.laser_ref = laser_ref
         self.bg_region = bg_region
@@ -6989,7 +6989,7 @@ class _AttoCubeImage:
     @staticmethod
     def _add_laser_circle(
         ax,
-        laser_ref : "AttoCubeLaserReferenceImage",
+        laser_ref : "ACLaserRefImg",
         linewidth : float = 1,
     ) -> patches.Circle:
         """
@@ -7056,7 +7056,7 @@ class _AttoCubeImage:
             Outline the region whose statistic was subtracted at construction.
             Warns and draws nothing if this image was built without a
             *bg_region* — some classes take none at all, e.g.
-            :class:`AttoCubeSampleImage`.
+            :class:`ACSampleImg`.
         bg_region_color : str
             Edge colour of that outline.
 
@@ -7101,26 +7101,26 @@ class _AttoCubeImage:
 
 
 # ---------------------------------------------------------------------------
-# AttoCubeSampleImage
+# ACSampleImg
 # ---------------------------------------------------------------------------
 
-class AttoCubeSampleImage(_AttoCubeImage):
+class ACSampleImg(_ACImg):
     """
     White-light reference image of the sample taken on the AttoCube confocal.
 
-    Use in conjunction with :class:`AttoCubeLaserReferenceImage` to locate
+    Use in conjunction with :class:`ACLaserRefImg` to locate
     the laser spot on the sample.
 
     Parameters
     ----------
     path : str or Path
         Path to the CSV image file.
-    laser_ref : AttoCubeLaserReferenceImage, optional
+    laser_ref : ACLaserRefImg, optional
         Laser spot reference for annotation.
 
     Notes
     -----
-    Takes **no background region**, unlike :class:`AttoCubePLImage`, and
+    Takes **no background region**, unlike :class:`ACImg`, and
     :attr:`bg_region` is therefore always ``None`` on an instance of this
     class.  Both reasons are about what a white-light frame is rather than
     about this class:
@@ -7135,7 +7135,7 @@ class AttoCubeSampleImage(_AttoCubeImage):
       frame nor the reference.
 
     Where a white-light background genuinely has to go, it is removed with an
-    estimator shaped like it: :class:`AttoCubeLaserReferenceImage` runs a white
+    estimator shaped like it: :class:`ACLaserRefImg` runs a white
     top-hat before fitting the spot, because the background there is flake
     contrast and reflectivity gradients rather than a constant.
     """
@@ -7143,15 +7143,15 @@ class AttoCubeSampleImage(_AttoCubeImage):
     # Load-bearing despite forwarding nothing: deleting this override would
     # inherit the base's bg_region/bg_stat parameters, which is what the Notes
     # above refuse.  laser_ref is the only extra this class accepts.
-    def __init__(self, path: str, laser_ref: "AttoCubeLaserReferenceImage" = None):
+    def __init__(self, path: str, laser_ref: "ACLaserRefImg" = None):
         super().__init__(path, laser_ref)
 
 
 # ---------------------------------------------------------------------------
-# AttoCubeLaserReferenceImage
+# ACLaserRefImg
 # ---------------------------------------------------------------------------
 
-class AttoCubeLaserReferenceImage(_AttoCubeImage):
+class ACLaserRefImg(_ACImg):
     """
     Laser-spot reference image taken on the AttoCube cryogenic confocal.
 
@@ -7362,7 +7362,7 @@ class AttoCubeLaserReferenceImage(_AttoCubeImage):
 
     def __repr__(self) -> str:
         return (
-            f"AttoCubeLaserReferenceImage\n"
+            f"ACLaserRefImg\n"
             f"  File                  : {self.path}\n"
             f"  Center                : ({self.center_x:.1f}, {self.center_y:.1f}) px\n"
             f"  Estimated 1/e² Radius : {self.radius:.1f} px\n"
@@ -7374,13 +7374,13 @@ class AttoCubeLaserReferenceImage(_AttoCubeImage):
 # SingleImage
 # ---------------------------------------------------------------------------
 
-class SingleImage(_AttoCubeImage):
+class SingleImage(_ACImg):
     """
     Generic single 2-D image loaded from a numeric CSV grid.
 
     Exposes the image as :attr:`img`, so it can be displayed in grayscale via
     the inherited :meth:`show_image` or with a colormap (and optional colorbar)
-    via :func:`~tmdc_optics_tools.plotting.plot_image`.
+    via :func:`~leman.plotting.plot_image`.
 
     Parameters
     ----------
@@ -7397,8 +7397,8 @@ class SingleImage(_AttoCubeImage):
             f"  File : {self.path}\n"
         )
 
-class AttoCubePLImage(_AttoCubeImage):
-    """A single real-space PL frame — same handling as AttoCubePLScanRealSpace,
+class ACImg(_ACImg):
+    """A single real-space PL frame — same handling as ACImgSweep,
     for spot-checking one file without building a full sequence."""
     def __init__(self, path, laser_ref=None, bg_region=None, bg_stat="median"):
         super().__init__(path, laser_ref=laser_ref, bg_region=bg_region, bg_stat=bg_stat)

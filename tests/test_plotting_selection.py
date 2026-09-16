@@ -20,8 +20,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import plotting
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep
+from leman import plotting
+from leman.loaders import ACSpectralSweep
 
 from test_loaders import PARAMS, make_spectral_csv
 from test_loaders_nesting import (
@@ -40,7 +40,7 @@ def flat(tmp_path):
     """Sweep index 0, 1, 2 against Scanner Y = 7.0, 7.5, 8.0 V."""
     path = tmp_path / "flat.csv"
     make_spectral_csv(path)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    return ACSpectralSweep(str(path), spectra_type="PL",
                                  sweep="piezo_y")
 
 
@@ -49,7 +49,7 @@ def undeclared(tmp_path):
     """The same file with no sweep declared, so the axis is the flat index."""
     path = tmp_path / "undeclared.csv"
     make_spectral_csv(path)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    return ACSpectralSweep(str(path), spectra_type="PL")
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def nested(tmp_path):
     """A nest declared on raw rows, which carry no unit of their own."""
     path = tmp_path / "raster.csv"
     make_spectral_csv(path, params=RASTER)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    return ACSpectralSweep(str(path), spectra_type="PL",
                                  fast_sweep="Scanner X",
                                  slow_sweep="Scanner Y")
 
@@ -67,7 +67,7 @@ def nested_curated(tmp_path):
     """The same raster declared through the registry, so both axes know volts."""
     path = tmp_path / "raster_curated.csv"
     make_spectral_csv(path, params=RASTER)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    return ACSpectralSweep(str(path), spectra_type="PL",
                                  fast_sweep="piezo_x",
                                  slow_sweep="piezo_y")
 
@@ -338,7 +338,7 @@ def test_an_ambiguous_coordinate_is_refused(tmp_path):
               "Excitation Power": np.full(loop.size, 1e-6)}
     path = tmp_path / "loop.csv"
     make_spectral_csv(path, params=params)
-    scan = AttoCubeSpectralSweep(str(path), spectra_type="PL", sweep="V_A")
+    scan = ACSpectralSweep(str(path), spectra_type="PL", sweep="V_A")
 
     with pytest.raises(ValueError, match="4"):
         plotting.plot_spectrum(scan, value=4.0)

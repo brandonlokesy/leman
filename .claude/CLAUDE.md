@@ -1,12 +1,15 @@
-# tmdc_optics_tools
+# Léman — Library for Exciton and Moiré Analysis in Nanostructures
 
 ## What this is
 
 A Python toolkit for TMDC optoelectronics/photonics measurements, developed in the
-LANES research group. Maintained by one person (Brandon), but written to become the
-standard analysis workflow for the group (~15 people max) — so error messages,
-defaults, and docstrings are held to a shared-library standard, not a personal-script
-one.
+LANES research group at EPFL. The Python package name is `leman` (no accent).
+Maintained by one person (Brandon), but written to become the standard analysis
+workflow for the group (~15 people max) — so error messages, defaults, and docstrings
+are held to a shared-library standard, not a personal-script one.
+
+**Class-name prefixes:** AC = AttoCube (cryogenic confocal), BT = BigTable (LabRAM
+export format).
 
 **Samples:** TMDCs in FET structures (bottom-, top-, dual-gated) or in cavities.
 
@@ -230,11 +233,11 @@ keyword in the index there. Don't re-litigate, and don't "helpfully" restore.
 - Don't fork `SPECTROSCOPY_TYPES` out of `constants.py`.
 - Don't add a second loader class for HDF5, store derived arrays in it, or replay
   corrections on read.
-- Don't give `AttoCubeTRPLSweep` a `spectra` attribute, or merge it into the spectral
+- Don't give `ACTRPLSweep` a `spectra` attribute, or merge it into the spectral
   class; don't add a row-by-row value check against the TRPL metadata companion.
 - Don't change the deprecation shim's `FutureWarning` to `DeprecationWarning`.
 - Don't apply the Jacobian before subtracting the background.
-- Don't forward `bg_region=`/`bg_stat=` to `AttoCubeSampleImage`, and don't delete its
+- Don't forward `bg_region=`/`bg_stat=` to `ACSampleImg`, and don't delete its
   `__init__` override — the override is what refuses them. A white-light frame's corner
   is substrate, not dark, and a reflectance correction is a ratio against a reference
   frame rather than a constant taken off the same frame.
@@ -332,7 +335,7 @@ keyword in the index there. Don't re-litigate, and don't "helpfully" restore.
   nothing; a wrong name reaches every axis label and every archive. Don't guess
   that rows 12 and 13 are swapped either. And don't put a unit on the
   gate-current rows — the blank one is a statement of ignorance. 0039.
-- Don't give `BigTableSpectralSweep` a `roi=`, and don't drop its fourth block
+- Don't give `BTSpectralSweep` a `roi=`, and don't drop its fourth block
   field silently. The two signal columns are identical in every file seen and what
   the second is *for* is unknown, so one is read and a disagreement warns — that
   disagreement is the evidence that would settle it. Don't promote the warning to
@@ -341,9 +344,9 @@ keyword in the index there. Don't re-litigate, and don't "helpfully" restore.
   column-count test. A real-space image's width divides by four often enough
   (a 512-column frame is committed under `examples/data/exciton-diffusion/`), so
   the count alone lets one through to be read as a 128-block sweep.
-- Don't make `BigTableSpectralSweep` write HDF5 by putting its one signal into
+- Don't make `BTSpectralSweep` write HDF5 by putting its one signal into
   both region slots. It would round-trip and read back as an
-  `AttoCubeSpectralSweep`. The format needs a field recording which instrument
+  `ACSpectralSweep`. The format needs a field recording which instrument
   wrote the file first; until then both directions refuse, with one shared
   message.
 
@@ -367,8 +370,8 @@ bwarea semantics are wanted at all.
 - `plot_diffusion_cloud` has ~30 parameters and returns `result` instead of its artists
   — the standing counter-example to *parameters earn their place*. New code must not
   copy it. (Its double-subtraction of the background is fixed; see **A5**.)
-- README still names `AttoCubePLScan`, which does not exist — the class is
-  `AttoCubeSpectralSweep`. (`plot_pl_map` is no longer mentioned there, `bg_region=` on
+- README's `print(scan)` output was updated from `AttoCubePLScan` to
+  `ACSpectralSweep`. (`plot_pl_map` is no longer mentioned there, `bg_region=` on
   `fit_scan_peak` and `extract_dipole_length` went with **C2**, and `__init__.py`'s
   quick start is fixed.)
 - `plot_current` is still named for the gate-sweep era, as are `plot_spectrum`'s

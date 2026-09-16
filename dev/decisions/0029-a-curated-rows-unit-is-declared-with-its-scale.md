@@ -97,7 +97,7 @@ copy, and it leaves the dead literal in place for someone to "fix" back into use
   back there for one of those five axes reintroduces B6.
 - The five collapsed pairs agreed before the change, so nothing about an un-overridden
   scan moved. That is pinned by a test, not asserted.
-- `AttoCubePLVabScan` keeps no unit argument. It forwards `power_scale` through
+- `ACPLVabScan` keeps no unit argument. It forwards `power_scale` through
   `super().__init__`, so using it warns through one extra frame and points at its own
   call rather than the caller's line. It is deprecated; the frame is documented where it
   happens rather than paid for with a new parameter on a retiring class.

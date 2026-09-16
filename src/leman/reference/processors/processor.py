@@ -1,4 +1,4 @@
-# src/tmdc_optics_tools/reference/processor.py
+# src/leman/reference/processor.py
 
 import io
 import requests

@@ -1,5 +1,5 @@
 """
-Tests for tmdc_optics_tools.converters.
+Tests for leman.converters.
 
 Frames are written synthetically into ``tmp_path``, so nothing here needs the
 lab share.  Two cases carry the weight and neither exists on the branch this
@@ -21,10 +21,10 @@ import numpy as np
 import pytest
 import tifffile
 
-from tmdc_optics_tools import converters
-from tmdc_optics_tools.loaders import (
-    AttoCubeSpectralSweep,
-    AttoCubeTRPLSweep,
+from leman import converters
+from leman.loaders import (
+    ACSpectralSweep,
+    ACTRPLSweep,
     DeviceGeometry,
     StackLayer,
 )
@@ -405,8 +405,8 @@ def test_spectral_csv_round_trips_through_the_archive(tmp_path):
     h5 = converters.convert_spectral_csv_to_hdf5(csv, "PL", out=tmp_path)
     assert h5.suffix == ".h5"
 
-    original = AttoCubeSpectralSweep(csv, spectra_type="PL")
-    reopened = AttoCubeSpectralSweep(h5, spectra_type="PL")
+    original = ACSpectralSweep(csv, spectra_type="PL")
+    reopened = ACSpectralSweep(h5, spectra_type="PL")
 
     assert np.array_equal(reopened.wavelength, original.wavelength)
     assert np.array_equal(reopened.spectra_roi1, original.spectra_roi1)
@@ -425,7 +425,7 @@ def test_the_archive_takes_declarations_it_was_not_converted_with(tmp_path):
     make_spectral_csv(csv)
     h5 = converters.convert_spectral_csv_to_hdf5(csv, "PL", out=tmp_path)
 
-    bare = AttoCubeSpectralSweep(h5, spectra_type="PL")
+    bare = ACSpectralSweep(h5, spectra_type="PL")
     assert bare.sweep_type == "index"            # nothing was claimed for it
 
     geom = DeviceGeometry(
@@ -433,7 +433,7 @@ def test_the_archive_takes_declarations_it_was_not_converted_with(tmp_path):
         d_hbn_top    = 53.0,
         d_hbn_bottom = 46.0,
     )
-    declared = AttoCubeSpectralSweep(
+    declared = ACSpectralSweep(
         h5, spectra_type="PL", sweep="V_A", gates=GATES, geometry=geom)
 
     assert declared.sweep_type == "V_A"
@@ -540,8 +540,8 @@ def test_trpl_directory_becomes_one_archive(tmp_path):
     h5 = converters.convert_trpl_dir_to_hdf5(folder)
 
     assert h5 == tmp_path / "converted" / "raw.h5"
-    original = AttoCubeTRPLSweep(folder)
-    reopened = AttoCubeTRPLSweep(h5)
+    original = ACTRPLSweep(folder)
+    reopened = ACTRPLSweep(h5)
     assert np.array_equal(reopened.time, original.time)
     assert np.array_equal(reopened.decays, original.decays)
     assert reopened.n_sweeps == 3
@@ -577,7 +577,7 @@ def test_prefix_picks_one_of_two_measurements_sharing_a_folder(tmp_path):
     h5 = converters.convert_trpl_dir_to_hdf5(folder, prefix="right1_")
 
     assert h5.name == "right1.h5"
-    assert AttoCubeTRPLSweep(h5).n_sweeps == 3        # not 6
+    assert ACTRPLSweep(h5).n_sweeps == 3        # not 6
 
 
 def test_a_committed_trpl_folder_writes_one_archive_not_two(tmp_path):
@@ -588,7 +588,7 @@ def test_a_committed_trpl_folder_writes_one_archive_not_two(tmp_path):
 
     archives = [p for p in report.outputs if p.suffix == ".h5"]
     assert len(archives) == 1
-    assert AttoCubeTRPLSweep(archives[0]).n_sweeps == 3
+    assert ACTRPLSweep(archives[0]).n_sweeps == 3
 
 
 # ---------------------------------------------------------------------------

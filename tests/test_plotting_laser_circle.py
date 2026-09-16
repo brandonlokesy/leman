@@ -26,14 +26,14 @@ from matplotlib.animation import PillowWriter
 from matplotlib.patches import Circle
 from matplotlib.patheffects import AbstractPathEffect
 
-from tmdc_optics_tools import plotting
+from leman import plotting
 
 SHAPE    = (32, 40)      # (ny, nx) — non-square, so a transposed frame would show
 N_FRAMES = 3
 
 
 class _FakeLaserRef:
-    """Stand-in for AttoCubeLaserReferenceImage: only these three are read."""
+    """Stand-in for ACLaserRefImg: only these three are read."""
 
     center_x = 18.0
     center_y = 12.0
@@ -42,7 +42,7 @@ class _FakeLaserRef:
 
 class _FakeScan:
     """
-    Duck-typed AttoCubePLScanRealSpace. The plotting functions touch only
+    Duck-typed ACImgSweep. The plotting functions touch only
     ``load_frame``, ``n_frames`` and ``laser_ref``, so no files are needed and
     the test stays hermetic.
     """

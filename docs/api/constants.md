@@ -4,7 +4,7 @@ Physical constants, material parameters, and literature values used throughout
 the package.  All values are module-level and can be imported directly:
 
 ```python
-from tmdc_optics_tools.constants import EPS_HBN, EXCITON_ENERGY
+from leman.constants import EPS_HBN, EXCITON_ENERGY
 ```
 
 ---

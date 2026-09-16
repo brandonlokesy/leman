@@ -1,4 +1,4 @@
-# tmdc_optics_tools/processing.py
+# leman/processing.py
 """
 Spectral processing and normalisation routines.
 
@@ -515,7 +515,7 @@ def reorder_grid(
     Flatten a ``(..., n_slow, n_fast)`` grid into a sequence in a chosen order.
 
     For a grid built by an AttoCube sweep's own
-    :meth:`~tmdc_optics_tools.loaders.AttoCubeSpectralSweep.as_grid` —
+    :meth:`~leman.loaders.ACSpectralSweep.as_grid` —
     ``(n_slow, n_fast)`` trailing, fast last because that is the axis the
     sweep itself ran to completion first — this controls which axis the
     returned flat sequence visits fastest, and which direction each axis
@@ -538,7 +538,7 @@ def reorder_grid(
 
     See Also
     --------
-    tmdc_optics_tools.loaders.AttoCubeSpectralSweep.as_grid : builds the
+    leman.loaders.ACSpectralSweep.as_grid : builds the
         grid this reshapes.
     """
     if inner_axis not in ("fast", "slow"):

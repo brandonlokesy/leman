@@ -43,7 +43,7 @@ Format facts and what each row was measured to be: `dev/instruments/big-table.md
 
 4. **HDF5 refuses in both directions**, with one shared message. The archive
    records which axis a file holds but not which instrument wrote it, so a saved
-   BigTable sweep would read back as an `AttoCubeSpectralSweep`.
+   BigTable sweep would read back as an `ACSpectralSweep`.
 
 5. **A grid whose blocks do not share one axis is refused.** In this export the
    second field of every block holds the same wavelength axis. That is the check

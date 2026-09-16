@@ -1,13 +1,13 @@
 """
 Tests for processing.reorder_grid -- flattens a (..., n_slow, n_fast) grid
-(as built by AttoCubeSpectralSweep.as_grid) into a flat sequence in a
+(as built by ACSpectralSweep.as_grid) into a flat sequence in a
 chosen traversal order and axis direction.
 """
 
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.processing import reorder_grid
+from leman.processing import reorder_grid
 
 N_SLOW, N_FAST = 3, 4
 # grid[slow, fast] = the flat index that position came from -- i.e. exactly

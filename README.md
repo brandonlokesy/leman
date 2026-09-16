@@ -1,10 +1,23 @@
-# tmdc_optics_tools
+# Léman — Library for Exciton and Moiré Analysis in Nanostructures
 
-A Python toolkit for gate-dependent photoluminescence spectroscopy on TMDC monolayers and van der Waals heterostructure devices. Covers data loading from AttoCube cryogenic confocal setups, device geometry modelling, spectral processing, peak fitting, DC Stark shift and dipole length extraction, and publication-ready plotting and animation.
+A Python toolkit for TMDC optoelectronics and photonics measurements, developed
+in the LANES group at EPFL. Covers data loading from AttoCube cryogenic confocal
+and LabRAM setups, device geometry modelling, spectral processing, peak fitting,
+DC Stark shift and dipole length extraction, time-resolved PL, real-space
+imaging, Raman spectroscopy, and publication-ready plotting and animation.
 
-📖 **Documentation:** https://brandonlokesy.github.io/LANES-TMDC-Optics-Tools/
+The Python package name is `leman` (no accent).
 
-> ⚠️ **Alpha stage.** This library is under active development. Class names, function signatures, and module structure are all subject to change without notice. Pin to a specific commit if you need stability.
+📖 **Documentation:** https://brandonlokesy.github.io/leman/
+
+### Class-name prefixes
+
+Loader classes are prefixed by the instrument or export format they read:
+
+| Prefix | Stands for | Instrument / format |
+|--------|------------|---------------------|
+| **AC** | AttoCube   | AttoCube cryogenic confocal |
+| **BT** | BigTable   | LabRAM BigTable CSV export |
 
 ---
 
@@ -30,8 +43,8 @@ A Python toolkit for gate-dependent photoluminescence spectroscopy on TMDC monol
 Clone the repository and install in editable mode:
 
 ```bash
-git clone https://github.com/brandonlokesy/LANES-TMDC-Optics-Tools.git
-cd LANES-TMDC-Optics-Tools
+git clone https://github.com/brandonlokesy/leman.git
+cd leman
 pip install -e .
 ```
 
@@ -47,9 +60,9 @@ pip install cmcrameri
 ## Package structure
 
 ```
-LANES-TMDC-Optics-Tools/
+leman/
 ├── constants.py   # Physical constants, material parameters (ε, thickness, exciton energies)
-├── loaders.py     # DeviceGeometry, AttoCubePLVabScan, AttoCubePLScanRealSpace, image classes
+├── loaders.py     # DeviceGeometry, ACPLVabScan, ACImgSweep, image classes
 ├── processing.py  # Normalisation, smoothing, background subtraction, spectral conversions
 ├── fitting.py     # Lorentzian/Gaussian fitting, multi-peak fitting, dipole length extraction
 └── plotting.py    # PL maps, spectrum plots, real-space animations, Stark shift plots
@@ -65,7 +78,7 @@ The `DeviceGeometry` class models the dielectric stack and computes the displace
 
 **Simple monolayer:**
 ```python
-from tmdc_optics_tools.loaders import DeviceGeometry
+from leman.loaders import DeviceGeometry
 
 geom = DeviceGeometry.from_single(
     tmdc         = "WS2",
@@ -76,7 +89,7 @@ geom = DeviceGeometry.from_single(
 
 **Heterobilayer (e.g. MoSe2/WSe2):**
 ```python
-from tmdc_optics_tools.loaders import DeviceGeometry, StackLayer
+from leman.loaders import DeviceGeometry, StackLayer
 
 geom = DeviceGeometry(
     tmdc_stack   = [StackLayer("MoSe2"), StackLayer("WSe2")],
@@ -96,17 +109,17 @@ The dielectric constant of the TMDC layers alone (excluding hBN) can be called w
 
 These scans are a map of the PL spectra with respect to the voltages A and B applied to the sample. Typically, we apply these voltages to the top and bottom gate to tune the electric field applied to the heterostructure. When the sample geometry is given, the electric field applied to the heterostructure is calculated.
 
-Which channel reached which gate depends on how the sample was connected, and no export file records it — so `AttoCubeSpectralSweep` requires it as `gates={"top": "V_A", "bottom": "V_B"}` and refuses to produce `v_top`, `v_bot` or `ef` without it. Transposing the two mirrors the field axis and flips the sign of any dipole extracted from it. The deprecated `AttoCubePLVabScan` below assumes `V_A`→top / `V_B`→bottom so that older scripts keep running; check it against your wiring before trusting a sign.
+Which channel reached which gate depends on how the sample was connected, and no export file records it — so `ACSpectralSweep` requires it as `gates={"top": "V_A", "bottom": "V_B"}` and refuses to produce `v_top`, `v_bot` or `ef` without it. Transposing the two mirrors the field axis and flips the sign of any dipole extracted from it. The deprecated `ACPLVabScan` below assumes `V_A`→top / `V_B`→bottom so that older scripts keep running; check it against your wiring before trusting a sign.
 
 ```python
-from tmdc_optics_tools.loaders import AttoCubePLVabScan
+from leman.loaders import ACPLVabScan
 
-scan = AttoCubePLVabScan(
+scan = ACPLVabScan(
     path     = "PL_dual_gate_sweep_26_05_15_11_42_07_iter_0.csv",
     geometry = geom,   # optional — enables displacement field axis
 )
 print(scan)
-# AttoCubePLScan — 101 sweeps × 1340 pixels
+# ACSpectralSweep — 101 sweeps × 1340 pixels
 #   λ range : 850.0 – 1000.0 nm  (1.240 – 1.459 eV)
 #   V_top   : -5.0 → 5.0 V
 #   E_F     : -12.3 → 12.3 mV/nm
@@ -132,7 +145,7 @@ Key attributes after loading:
 ### 3. Plot a spectral map
 
 ```python
-from tmdc_optics_tools import plotting
+from leman import plotting
 
 plotting.set_style("paper")   # or "talk", "poster". Optional
 
@@ -194,7 +207,7 @@ gone, on either axis. What the fit adds is `baseline`, a flat or sloping offset 
 *alongside* the peak so an un-subtracted pedestal cannot inflate the amplitude and width:
 
 ```python
-from tmdc_optics_tools import fitting
+from leman import fitting
 
 results = fitting.fit_scan_peak(
     scan,
@@ -262,9 +275,9 @@ fig, ax = plotting.plot_stark_shift(result, show_fit=True)
 Load a folder of real-space PL image CSVs (one per gate voltage step) and animate them:
 
 ```python
-from tmdc_optics_tools.loaders import AttoCubePLScanRealSpace
+from leman.loaders import ACImgSweep
 
-rs_scan = AttoCubePLScanRealSpace(
+rs_scan = ACImgSweep(
     path   = "./images/",
     prefix = "PLdualgatesweep_iter_",
 )
@@ -284,13 +297,13 @@ anim.save("gate_sweep.gif", fps=5)
 Optionally annotate the laser spot position using a reference image:
 
 ```python
-from tmdc_optics_tools.loaders import AttoCubeLaserReferenceImage
+from leman.loaders import ACLaserRefImg
 
-laser_ref = AttoCubeLaserReferenceImage("laser_ref.csv")
+laser_ref = ACLaserRefImg("laser_ref.csv")
 print(laser_ref)
 # Center: (63.4, 71.2) px  |  1/e² Radius: 8.3 px
 
-rs_scan = AttoCubePLScanRealSpace(..., laser_ref=laser_ref)
+rs_scan = ACImgSweep(..., laser_ref=laser_ref)
 ```
 
 ---
@@ -315,11 +328,19 @@ Literature values for hBN, WS2, WSe2, MoSe2, MoS2: out-of-plane dielectric const
 | Class | Purpose |
 |---|---|
 | `StackLayer` | One material slab in a vdW stack |
-| `DeviceGeometry` | Dielectric stack model; computes ε_eff, optical thickness, displacement field |
-| `AttoCubePLVabScan` | Gate-dependent PL scan from AttoCube confocal CSV |
-| `AttoCubePLScanRealSpace` | Sequence of real-space PL image CSVs |
-| `AttoCubeSampleImage` | White-light sample reference image |
-| `AttoCubeLaserReferenceImage` | Laser spot image with fitted 1/e² radius |
+| `DeviceGeometry` | Dielectric stack model; computes ε_eff, displacement field |
+| `ACSpectralSweep` | Spectral sweep from AttoCube confocal CSV or HDF5 |
+| `BTSpectralSweep` | Spectral sweep from LabRAM BigTable CSV |
+| `ACTRPLSweep` | Time-resolved PL sweep from AttoCube confocal |
+| `ACImgSweep` | Sequence of real-space CCD image CSVs |
+| `ACImg` | Single CCD frame (e.g. PL image) |
+| `ACSampleImg` | White-light sample reference image |
+| `ACLaserRefImg` | Laser spot image with fitted 1/e² radius |
+| `SingleSpectrum` | A single two-row CSV spectrum |
+| `SingleImage` | A single numeric-grid CSV image |
+| `RamanSpectrum` | Single Raman spectrum from LabRAM |
+| `RamanMap` | 2-D Raman spatial map from LabRAM |
+| `ACPLVabScan` | Deprecated; use `ACSpectralSweep` with explicit `sweep=` |
 
 ### `processing`
 | Function | Purpose |

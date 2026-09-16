@@ -1,7 +1,7 @@
 """
 Tests for ``frame_source=`` on the real-space viewers (audit B1).
 
-``bg_region`` on ``AttoCubePLScanRealSpace`` was stored and never read, so no
+``bg_region`` on ``ACImgSweep`` was stored and never read, so no
 viewer could show a background-subtracted frame.  The correction now lives in
 ``load_frame_bg``, leaving ``load_frame`` as the file's own counts, and the
 viewers choose between them.
@@ -17,8 +17,8 @@ matplotlib.use("Agg", force=True)      # headless: render without a display
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import plotting
-from tmdc_optics_tools.loaders import AttoCubePLScanRealSpace
+from leman import plotting
+from leman.loaders import ACImgSweep
 
 SHAPE = (8, 10)                        # (ny, nx) — non-square, so a transpose shows
 
@@ -37,7 +37,7 @@ def _scan(tmp_path, **kwargs):
         img = np.full(SHAPE, SIGNAL_FILL + i)
         img[BG_REGION] = [[1.0, 1.0], [1.0, 21.0]]
         np.savetxt(tmp_path / f"pl_iter_{i}.csv", img, delimiter=",")
-    return AttoCubePLScanRealSpace(tmp_path, prefix="pl_", **kwargs)
+    return ACImgSweep(tmp_path, prefix="pl_", **kwargs)
 
 
 def _drawn(ax) -> np.ndarray:

@@ -14,8 +14,8 @@ import warnings
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.constants import HC_EV_NM
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep
+from leman.constants import HC_EV_NM
+from leman.loaders import ACSpectralSweep
 
 from test_loaders import make_spectral_csv, WAVELENGTH, N_PIXELS
 
@@ -24,7 +24,7 @@ from test_loaders import make_spectral_csv, WAVELENGTH, N_PIXELS
 def scan(tmp_path):
     path = tmp_path / "sweep.csv"
     make_spectral_csv(path)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    return ACSpectralSweep(str(path), spectra_type="PL")
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def unordered(tmp_path):
     wl[2], wl[9] = wl[9], wl[2]          # 800, 801, 809, 803, ..., 808, 802
     path = tmp_path / "unordered.csv"
     make_spectral_csv(path, wavelength=wl)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    return ACSpectralSweep(str(path), spectra_type="PL")
 
 
 # ---------------------------------------------------------------------------

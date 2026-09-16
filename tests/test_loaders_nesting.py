@@ -17,8 +17,8 @@ import warnings
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.loaders import (
-    AttoCubeSpectralSweep,
+from leman.loaders import (
+    ACSpectralSweep,
     DeviceGeometry,
     StackLayer,
     _axis_atol,
@@ -135,7 +135,7 @@ def field_csv(tmp_path):
 
 @pytest.fixture
 def nested(raster_csv):
-    return AttoCubeSpectralSweep(str(raster_csv), spectra_type="PL",
+    return ACSpectralSweep(str(raster_csv), spectra_type="PL",
                                  fast_sweep="Scanner X",
                                  slow_sweep="Scanner Y")
 
@@ -143,7 +143,7 @@ def nested(raster_csv):
 @pytest.fixture
 def flat(raster_csv):
     """The same file with no nest declared — every grid entry point then refuses."""
-    return AttoCubeSpectralSweep(str(raster_csv), spectra_type="PL")
+    return ACSpectralSweep(str(raster_csv), spectra_type="PL")
 
 
 @pytest.fixture
@@ -174,7 +174,7 @@ def test_undeclared_sweep_is_not_nested(flat):
 
 def test_coordinates_keep_acquisition_order(field_csv, geometry):
     """A descending axis stays descending: the coordinates are not sorted."""
-    scan = AttoCubeSpectralSweep(str(field_csv), spectra_type="PL",
+    scan = ACSpectralSweep(str(field_csv), spectra_type="PL",
                                  gates=GATES, geometry=geometry,
                                  fast_sweep="electric_field", slow_sweep="power")
     fast = scan.nesting.fast_axis
@@ -189,7 +189,7 @@ def test_derived_axis_nests_where_the_raw_rows_cannot(field_csv, geometry):
     n_slow`` points, so no row-level reading can express the nest.  The field
     they encode takes exactly ``n_fast``, and declares it.
     """
-    scan = AttoCubeSpectralSweep(str(field_csv), spectra_type="PL",
+    scan = ACSpectralSweep(str(field_csv), spectra_type="PL",
                                  gates=GATES, geometry=geometry,
                                  fast_sweep="electric_field", slow_sweep="power")
     assert (scan.nesting.n_fast, scan.nesting.n_slow) == (N_FAST, N_SLOW)
@@ -200,7 +200,7 @@ def test_derived_axis_nests_where_the_raw_rows_cannot(field_csv, geometry):
     assert np.unique(scan["V_A"]).size == N_SWEEPS
     assert scan.sweep_grid() is None
     with pytest.raises(ValueError, match="does not describe"):
-        AttoCubeSpectralSweep(str(field_csv), spectra_type="PL",
+        ACSpectralSweep(str(field_csv), spectra_type="PL",
                               fast_sweep="V_A", slow_sweep="power")
 
 
@@ -215,7 +215,7 @@ def test_a_level_wider_than_the_axis_tolerance_still_nests(tmp_path):
     """
     path = tmp_path / "power.csv"
     make_spectral_csv(path, params=POWER_SWEEP)
-    scan = AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    scan = ACSpectralSweep(str(path), spectra_type="PL",
                                  fast_sweep="V_B", slow_sweep="power")
 
     assert (scan.nesting.n_fast, scan.nesting.n_slow) == (N_FAST, N_SLOW)
@@ -232,7 +232,7 @@ def test_a_wobbling_level_still_names_the_swap(tmp_path):
     path = tmp_path / "power.csv"
     make_spectral_csv(path, params=POWER_SWEEP)
     with pytest.raises(ValueError) as exc:
-        AttoCubeSpectralSweep(str(path), spectra_type="PL",
+        ACSpectralSweep(str(path), spectra_type="PL",
                               fast_sweep="power", slow_sweep="V_B")
     assert "Swapping them does" in str(exc.value)
 
@@ -253,7 +253,7 @@ def test_a_scattered_level_nests_when_its_levels_stay_apart(tmp_path):
     params = dict(POWER_SWEEP, **{"Excitation Power": readback / 0.303e6})
     path   = tmp_path / "scattered.csv"
     make_spectral_csv(path, params=params)
-    scan = AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    scan = ACSpectralSweep(str(path), spectra_type="PL",
                                  fast_sweep="V_B", slow_sweep="power")
 
     assert (scan.nesting.n_fast, scan.nesting.n_slow) == (N_FAST, N_SLOW)
@@ -284,7 +284,7 @@ def test_a_scattered_axis_nests_as_the_fast_axis_too(tmp_path):
     })
     path = tmp_path / "power_fast.csv"
     make_spectral_csv(path, params=params)
-    scan = AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    scan = ACSpectralSweep(str(path), spectra_type="PL",
                                  fast_sweep="power", slow_sweep="V_B")
 
     assert (scan.nesting.n_fast, scan.nesting.n_slow) == (N_FAST, N_SLOW)
@@ -298,7 +298,7 @@ def test_a_scattered_axis_nests_as_the_fast_axis_too(tmp_path):
 
 def test_swapped_declaration_raises_and_names_the_swap(raster_csv):
     with pytest.raises(ValueError) as exc:
-        AttoCubeSpectralSweep(str(raster_csv), spectra_type="PL",
+        ACSpectralSweep(str(raster_csv), spectra_type="PL",
                               fast_sweep="Scanner Y", slow_sweep="Scanner X")
     msg = str(exc.value)
     assert "Swapping them does" in msg
@@ -314,12 +314,12 @@ def test_swapped_declaration_raises_and_names_the_swap(raster_csv):
 ])
 def test_one_axis_alone_raises(raster_csv, kwargs, missing):
     with pytest.raises(ValueError, match=missing):
-        AttoCubeSpectralSweep(str(raster_csv), spectra_type="PL", **kwargs)
+        ACSpectralSweep(str(raster_csv), spectra_type="PL", **kwargs)
 
 
 def test_same_axis_twice_raises(raster_csv):
     with pytest.raises(ValueError, match="two different axes"):
-        AttoCubeSpectralSweep(str(raster_csv), spectra_type="PL",
+        ACSpectralSweep(str(raster_csv), spectra_type="PL",
                               fast_sweep="Scanner X", slow_sweep="Scanner X")
 
 
@@ -333,7 +333,7 @@ def test_overlapping_levels_are_refused_and_quoted(plateau_csv):
     rather than reporting an arithmetic mismatch.
     """
     with pytest.raises(ValueError) as exc:
-        AttoCubeSpectralSweep(str(plateau_csv), spectra_type="PL",
+        ACSpectralSweep(str(plateau_csv), spectra_type="PL",
                               fast_sweep="V_B", slow_sweep="power")
 
     msg = str(exc.value)
@@ -361,7 +361,7 @@ def test_a_non_finite_reading_refuses_the_nest(tmp_path):
     path   = tmp_path / "gap.csv"
     make_spectral_csv(path, params=params)
     with pytest.raises(ValueError, match="does not describe"):
-        AttoCubeSpectralSweep(str(path), spectra_type="PL",
+        ACSpectralSweep(str(path), spectra_type="PL",
                               fast_sweep="V_B", slow_sweep="power")
 
 
@@ -378,7 +378,7 @@ def test_grouping_by_a_setpoint_labels_with_the_measurement(grouped_csv):
     reading is in µW but cannot resolve its own levels.
     """
     with pytest.warns(UserWarning, match="levels overlap"):
-        scan = AttoCubeSpectralSweep(str(grouped_csv), spectra_type="PL",
+        scan = ACSpectralSweep(str(grouped_csv), spectra_type="PL",
                                      fast_sweep="V_B", slow_sweep="power",
                                      slow_group_by="Fianium_Select_A4")
 
@@ -400,7 +400,7 @@ def test_a_level_coordinate_is_the_median_not_the_first_reading(grouped_csv):
     levels ramp upward through each row.
     """
     with pytest.warns(UserWarning, match="levels overlap"):
-        scan = AttoCubeSpectralSweep(str(grouped_csv), spectra_type="PL",
+        scan = ACSpectralSweep(str(grouped_csv), spectra_type="PL",
                                      fast_sweep="V_B", slow_sweep="power",
                                      slow_group_by="Fianium_Select_A4")
 
@@ -413,7 +413,7 @@ def test_a_level_coordinate_is_the_median_not_the_first_reading(grouped_csv):
 def test_the_spread_behind_each_level_is_exposed(grouped_csv):
     """A single coordinate hides a level that is not flat, so the range comes with it."""
     with pytest.warns(UserWarning, match="levels overlap"):
-        scan = AttoCubeSpectralSweep(str(grouped_csv), spectra_type="PL",
+        scan = ACSpectralSweep(str(grouped_csv), spectra_type="PL",
                                      fast_sweep="V_B", slow_sweep="power",
                                      slow_group_by="Fianium_Select_A4")
 
@@ -437,7 +437,7 @@ def test_the_overlap_warning_points_at_the_caller(grouped_csv):
     looking at.
     """
     with pytest.warns(UserWarning, match="levels overlap") as caught:
-        AttoCubeSpectralSweep(str(grouped_csv), spectra_type="PL",
+        ACSpectralSweep(str(grouped_csv), spectra_type="PL",
                               fast_sweep="V_B", slow_sweep="power",
                               slow_group_by="Fianium_Select_A4")
 
@@ -451,7 +451,7 @@ def test_grouping_does_not_warn_when_the_label_is_also_clean(tmp_path):
     make_spectral_csv(path, params=params)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        scan = AttoCubeSpectralSweep(str(path), spectra_type="PL",
+        scan = ACSpectralSweep(str(path), spectra_type="PL",
                                      fast_sweep="V_B", slow_sweep="power",
                                      slow_group_by="Fianium_Select_A4")
     assert scan.nesting.shape == (N_SLOW, N_FAST)
@@ -466,7 +466,7 @@ def test_a_failing_grouping_row_is_named_as_the_grouping_row(grouped_csv):
     which here is the setpoint and is fine.
     """
     with pytest.raises(ValueError) as exc:
-        AttoCubeSpectralSweep(str(grouped_csv), spectra_type="PL",
+        ACSpectralSweep(str(grouped_csv), spectra_type="PL",
                               fast_sweep="V_B", slow_sweep="Fianium_Select_A4",
                               slow_group_by="power")
     assert "slow_group_by='power'" in str(exc.value)
@@ -474,14 +474,14 @@ def test_a_failing_grouping_row_is_named_as_the_grouping_row(grouped_csv):
 
 def test_grouping_without_axes_raises(grouped_csv):
     with pytest.raises(ValueError, match="without fast_sweep"):
-        AttoCubeSpectralSweep(str(grouped_csv), spectra_type="PL",
+        ACSpectralSweep(str(grouped_csv), spectra_type="PL",
                               slow_group_by="Fianium_Select_A4")
 
 
 def test_grouping_by_the_sweep_index_raises(grouped_csv):
     """The flat index differs at every point, so it puts each spectrum on its own level."""
     with pytest.raises(ValueError, match="cannot group a nest"):
-        AttoCubeSpectralSweep(str(grouped_csv), spectra_type="PL",
+        ACSpectralSweep(str(grouped_csv), spectra_type="PL",
                               fast_sweep="V_B", slow_sweep="power",
                               slow_group_by="index")
 
@@ -494,13 +494,13 @@ def test_a_grouped_nest_survives_a_round_trip(grouped_csv, tmp_path):
     the row that could not resolve it in the first place.
     """
     with pytest.warns(UserWarning, match="levels overlap"):
-        scan = AttoCubeSpectralSweep(str(grouped_csv), spectra_type="PL",
+        scan = ACSpectralSweep(str(grouped_csv), spectra_type="PL",
                                      fast_sweep="V_B", slow_sweep="power",
                                      slow_group_by="Fianium_Select_A4")
     path = tmp_path / "grouped.h5"
     scan.to_hdf5(str(path))
     with pytest.warns(UserWarning, match="levels overlap"):
-        back = AttoCubeSpectralSweep(str(path), spectra_type="PL")
+        back = ACSpectralSweep(str(path), spectra_type="PL")
 
     assert back.nesting.shape == (N_SLOW, N_FAST)
     assert back.nesting.slow_group == "Fianium_Select_A4"
@@ -518,7 +518,7 @@ def test_a_grouped_nest_survives_a_round_trip(grouped_csv, tmp_path):
 def test_an_asserted_shape_loads_what_the_readings_refuse(plateau_csv, kwargs):
     """Either count alone is enough, since n_sweeps is known; both is cross-checked."""
     with pytest.warns(UserWarning, match="does not hold apart"):
-        scan = AttoCubeSpectralSweep(str(plateau_csv), spectra_type="PL",
+        scan = ACSpectralSweep(str(plateau_csv), spectra_type="PL",
                                      fast_sweep="V_B", slow_sweep="power", **kwargs)
     assert scan.nesting.shape == (N_SLOW, N_FAST)
     assert scan.nesting.asserted
@@ -529,7 +529,7 @@ def test_an_asserted_shape_loads_what_the_readings_refuse(plateau_csv, kwargs):
 def test_an_asserted_shape_warns_about_the_axis_that_overlaps(plateau_csv):
     """The warning names the axis at fault and quotes the ranges, but does not refuse."""
     with pytest.warns(UserWarning) as rec:
-        AttoCubeSpectralSweep(str(plateau_csv), spectra_type="PL",
+        ACSpectralSweep(str(plateau_csv), spectra_type="PL",
                               fast_sweep="V_B", slow_sweep="power", n_fast=N_FAST)
     overlaps = [str(w.message) for w in rec if "does not hold apart" in str(w.message)]
     # The gate axis is clean, so exactly one axis is reported.
@@ -547,7 +547,7 @@ def test_transposed_counts_warn_about_the_clean_axis(plateau_csv):
     the true shape, reporting that it cannot tell its own settings apart.
     """
     with pytest.warns(UserWarning) as rec:
-        AttoCubeSpectralSweep(str(plateau_csv), spectra_type="PL",
+        ACSpectralSweep(str(plateau_csv), spectra_type="PL",
                               fast_sweep="V_B", slow_sweep="power", n_fast=N_SLOW)
     overlaps = [str(w.message) for w in rec if "does not hold apart" in str(w.message)]
     assert any("fast_sweep='V_B'" in m for m in overlaps)
@@ -561,20 +561,20 @@ def test_transposed_counts_warn_about_the_clean_axis(plateau_csv):
 ])
 def test_an_impossible_asserted_shape_raises(plateau_csv, kwargs, match):
     with pytest.raises(ValueError, match=match):
-        AttoCubeSpectralSweep(str(plateau_csv), spectra_type="PL",
+        ACSpectralSweep(str(plateau_csv), spectra_type="PL",
                               fast_sweep="V_B", slow_sweep="power", **kwargs)
 
 
 def test_a_shape_without_axes_raises(plateau_csv):
     """A shape says how the points divide up, not what was scanned along each axis."""
     with pytest.raises(ValueError, match="without fast_sweep"):
-        AttoCubeSpectralSweep(str(plateau_csv), spectra_type="PL", n_fast=N_FAST)
+        ACSpectralSweep(str(plateau_csv), spectra_type="PL", n_fast=N_FAST)
 
 
 def test_an_ambiguous_refusal_names_the_override(plateau_csv):
     """The refusal has to offer the way through, or it reads as a missing feature."""
     with pytest.raises(ValueError, match=r"n_fast="):
-        AttoCubeSpectralSweep(str(plateau_csv), spectra_type="PL",
+        ACSpectralSweep(str(plateau_csv), spectra_type="PL",
                               fast_sweep="V_B", slow_sweep="power")
 
 
@@ -584,7 +584,7 @@ def test_aborted_raster_raises_naming_the_sweep_total(tmp_path):
     path = tmp_path / "aborted.csv"
     make_spectral_csv(path, params=partial)
     with pytest.raises(ValueError) as exc:
-        AttoCubeSpectralSweep(str(path), spectra_type="PL",
+        ACSpectralSweep(str(path), spectra_type="PL",
                               fast_sweep="Scanner X", slow_sweep="Scanner Y")
     msg = str(exc.value)
     assert "aborted" in msg
@@ -598,7 +598,7 @@ def test_the_committed_truncated_raster_refuses():
     path = str(DATA / "reflectance-contrast"
                     / "sample_truncated_26_07_24_17_55_47_iter_0.csv")
     with pytest.raises(ValueError):
-        AttoCubeSpectralSweep(path, spectra_type="R",
+        ACSpectralSweep(path, spectra_type="R",
                               fast_sweep="Scanner X", slow_sweep="Scanner Y")
 
 
@@ -742,7 +742,7 @@ def test_negative_indices_count_from_the_end(nested):
 
 
 def test_source_selects_the_array(raster_csv):
-    scan = AttoCubeSpectralSweep(str(raster_csv), spectra_type="PL",
+    scan = ACSpectralSweep(str(raster_csv), spectra_type="PL",
                                  fast_sweep="Scanner X", slow_sweep="Scanner Y")
     assert np.array_equal(scan.get_spectrum_at(fast=2.0, slow=5.0, source="raw",
                                                x_axis="wavelength"),
@@ -817,7 +817,7 @@ FIXED_RATIO = {
 def field_sweep(tmp_path, geometry):
     path = tmp_path / "fixed_ratio.csv"
     make_spectral_csv(path, params=FIXED_RATIO)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL", gates=GATES,
+    return ACSpectralSweep(str(path), spectra_type="PL", gates=GATES,
                                  geometry=geometry, sweep="electric_field")
 
 
@@ -866,7 +866,7 @@ def test_a_non_injective_quantity_warns_naming_every_match(tmp_path):
               "Scanner X": np.full(loop.size, 5.0)}
     path = tmp_path / "hysteresis.csv"
     make_spectral_csv(path, params=params)
-    scan = AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    scan = ACSpectralSweep(str(path), spectra_type="PL")
 
     with pytest.warns(UserWarning, match="at 2 sweep points") as caught:
         idx = scan.nearest_index(4.0, axis="V_A")
@@ -894,7 +894,7 @@ def test_either_quantity_of_a_nest_warns_when_declared_as_the_axis(
         raster_csv, sweep, n_distinct):
     """Both leave repeats, so both collapse a map — direction is beside the point."""
     with pytest.warns(UserWarning, match="does not label them individually") as c:
-        AttoCubeSpectralSweep(str(raster_csv), spectra_type="PL", sweep=sweep)
+        ACSpectralSweep(str(raster_csv), spectra_type="PL", sweep=sweep)
     msg = str(c[0].message)
     assert f"only {n_distinct} different values across {N_SWEEPS}" in msg
     assert "Scanner X (4) × Scanner Y (3)" in msg
@@ -910,7 +910,7 @@ def test_a_nest_no_grid_search_can_see_still_warns(field_csv, geometry):
     a raster's slow axis does.
     """
     with pytest.warns(UserWarning, match="does not label them individually") as c:
-        scan = AttoCubeSpectralSweep(str(field_csv), spectra_type="PL",
+        scan = ACSpectralSweep(str(field_csv), spectra_type="PL",
                                      gates=GATES, geometry=geometry,
                                      sweep="power")
     assert scan.sweep_grid() is None
@@ -921,13 +921,13 @@ def test_an_undeclared_sweep_on_a_raster_is_silent(raster_csv):
     """The flat index labels every point, so there is nothing to say."""
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        AttoCubeSpectralSweep(str(raster_csv), spectra_type="PL")
+        ACSpectralSweep(str(raster_csv), spectra_type="PL")
 
 
 def test_an_axis_that_labels_every_point_is_silent(field_csv, geometry):
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        AttoCubeSpectralSweep(str(field_csv), spectra_type="PL", gates=GATES,
+        ACSpectralSweep(str(field_csv), spectra_type="PL", gates=GATES,
                               geometry=geometry, sweep="top_voltage")
 
 
@@ -941,7 +941,7 @@ def undeclared_raster(raster_csv):
     """A raster nobody declared — flat as far as the loader knows."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return AttoCubeSpectralSweep(str(raster_csv), spectra_type="PL")
+        return ACSpectralSweep(str(raster_csv), spectra_type="PL")
 
 
 def test_an_ambiguous_coordinate_is_refused_not_silently_narrowed(
@@ -994,7 +994,7 @@ def test_repr_distinguishes_a_declared_nest_from_a_detected_one(nested, flat):
 def test_declared_nest_survives_a_round_trip(nested, tmp_path):
     path = tmp_path / "nested.h5"
     nested.to_hdf5(str(path))
-    back = AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    back = ACSpectralSweep(str(path), spectra_type="PL")
     assert back.is_nested
     assert back.nesting.fast_type == "Scanner X"
     assert back.nesting.slow_type == "Scanner Y"
@@ -1005,12 +1005,12 @@ def test_declared_nest_survives_a_round_trip(nested, tmp_path):
 
 
 def test_a_derived_nest_survives_a_round_trip(field_csv, tmp_path, geometry):
-    scan = AttoCubeSpectralSweep(str(field_csv), spectra_type="PL",
+    scan = ACSpectralSweep(str(field_csv), spectra_type="PL",
                                  gates=GATES, geometry=geometry,
                                  fast_sweep="electric_field", slow_sweep="power")
     path = tmp_path / "derived.h5"
     scan.to_hdf5(str(path))
-    back = AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    back = ACSpectralSweep(str(path), spectra_type="PL")
     assert back.nesting.fast_type == "electric_field"
     assert np.allclose(back.nesting.fast_axis, scan.nesting.fast_axis)
 
@@ -1018,14 +1018,14 @@ def test_a_derived_nest_survives_a_round_trip(field_csv, tmp_path, geometry):
 def test_an_undeclared_scan_gains_no_nest_on_read(flat, tmp_path):
     path = tmp_path / "flat.h5"
     flat.to_hdf5(str(path))
-    back = AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    back = ACSpectralSweep(str(path), spectra_type="PL")
     assert not back.is_nested
 
 
 def test_the_argument_still_overrides_the_file(flat, tmp_path):
     path = tmp_path / "flat.h5"
     flat.to_hdf5(str(path))
-    back = AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    back = ACSpectralSweep(str(path), spectra_type="PL",
                                  fast_sweep="Scanner X", slow_sweep="Scanner Y")
     assert back.nesting.shape == (N_SLOW, N_FAST)
 
@@ -1038,13 +1038,13 @@ def test_an_asserted_shape_survives_a_round_trip(plateau_csv, tmp_path):
     file — the same reasoning `gates` is stored under.
     """
     with pytest.warns(UserWarning, match="does not hold apart"):
-        scan = AttoCubeSpectralSweep(str(plateau_csv), spectra_type="PL",
+        scan = ACSpectralSweep(str(plateau_csv), spectra_type="PL",
                                      fast_sweep="V_B", slow_sweep="power",
                                      n_fast=N_FAST)
     path = tmp_path / "asserted.h5"
     scan.to_hdf5(str(path))
     with pytest.warns(UserWarning, match="does not hold apart"):
-        back = AttoCubeSpectralSweep(str(path), spectra_type="PL")
+        back = ACSpectralSweep(str(path), spectra_type="PL")
     assert back.nesting.shape == (N_SLOW, N_FAST)
     assert back.nesting.asserted
     assert np.allclose(back.nesting.slow_axis, scan.nesting.slow_axis)
@@ -1059,6 +1059,6 @@ def test_a_resolved_shape_is_not_stored_as_an_assertion(nested, tmp_path):
     """
     path = tmp_path / "resolved.h5"
     nested.to_hdf5(str(path))
-    back = AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    back = ACSpectralSweep(str(path), spectra_type="PL")
     assert back.is_nested
     assert not back.nesting.asserted

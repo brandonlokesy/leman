@@ -18,7 +18,7 @@ import warnings
 import numpy as np
 import pytest
 
-from tmdc_optics_tools.processing import remove_cosmic_rays
+from leman.processing import remove_cosmic_rays
 
 N_PIX     = 400
 N_SWEEPS  = 24

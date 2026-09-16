@@ -17,8 +17,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import plotting
-from tmdc_optics_tools.loaders import AttoCubeSpectralSweep
+from leman import plotting
+from leman.loaders import ACSpectralSweep
 
 from test_loaders import make_spectral_csv
 from test_loaders_nesting import N_FAST, RASTER, SLOW_VALUES
@@ -35,7 +35,7 @@ def nested(tmp_path):
     """A raster declared on raw rows, N_FAST inside N_SLOW."""
     path = tmp_path / "raster.csv"
     make_spectral_csv(path, params=RASTER)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    return ACSpectralSweep(str(path), spectra_type="PL",
                                  fast_sweep="Scanner X",
                                  slow_sweep="Scanner Y")
 

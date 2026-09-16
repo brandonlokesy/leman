@@ -12,7 +12,7 @@ matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 import numpy as np
 
-from tmdc_optics_tools import plotting
+from leman import plotting
 
 DATA = np.array([[1.0, 2.0, np.nan], [3.0, 4.0, 5.0]])
 

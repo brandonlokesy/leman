@@ -1,4 +1,4 @@
-# tmdc_optics_tools/diffusion.py
+# leman/diffusion.py
 """
 Exciton diffusion cloud analysis.
 
@@ -31,7 +31,7 @@ from pathlib import Path
 
 from . import processing
 
-from tmdc_optics_tools.loaders import _AttoCubeImage
+from leman.loaders import _ACImg
 
 # ---------------------------------------------------------------------------
 # Result container
@@ -87,7 +87,7 @@ class DiffusionResult:
         Unit *pixel_scale* was given in, and therefore the unit of
         :attr:`x_real` / :attr:`y_real`; :attr:`area_real` is in its square.
         Carried so that a reader of the result — ``__repr__``, or
-        :func:`~tmdc_optics_tools.plotting.plot_centroid_trajectory`'s axis
+        :func:`~leman.plotting.plot_centroid_trajectory`'s axis
         label — can say what the real-space numbers are in. The scale is
         typically calibrated per session against a known laser-spot size, so
         the unit is the caller's choice rather than a property of the
@@ -239,7 +239,7 @@ class DiffusionSequenceResult:
 # ---------------------------------------------------------------------------
 
 def analyse_diffusion_cloud(
-    image         : np.ndarray | str | PathLike | "_AttoCubeImage",
+    image         : np.ndarray | str | PathLike | "_ACImg",
     threshold     : float | str = "1/e",
     smooth_sigma  : float       = 0.0,
     keep_largest  : bool        = False,
@@ -259,12 +259,12 @@ def analyse_diffusion_cloud(
 
     Parameters
     ----------
-    image : np.ndarray, str, pathlib.Path, or _AttoCubeImage
+    image : np.ndarray, str, pathlib.Path, or _ACImg
         Background-subtracted PL image. Accepted inputs are:
 
         - a 2D NumPy array with shape (H, W),
         - a path to a CSV file, or
-        - an instance of _AttoCubeImage or any of its subclasses.
+        - an instance of _ACImg or any of its subclasses.
 
         Image data should be numeric (float or int).
     threshold : float or ``"otsu"``
@@ -286,7 +286,7 @@ def analyse_diffusion_cloud(
     scale_units : str
         Unit *pixel_scale* is given in. Carried on the result, which is what
         lets its ``__repr__`` and
-        :func:`~tmdc_optics_tools.plotting.plot_centroid_trajectory` say what
+        :func:`~leman.plotting.plot_centroid_trajectory` say what
         the real-space numbers are in. Ignored when *pixel_scale* is ``None``,
         since nothing is converted.
     origin : {``"corner"``, ``"center"``, ``"image_center"``}
@@ -421,11 +421,11 @@ def analyse_diffusion_sequence(
 
     The *frames* list can be either a list of ``np.ndarray`` images, or any
     object exposing ``load_frame(idx)`` and ``n_frames`` (i.e. an
-    :class:`~tmdc_optics_tools.loaders.AttoCubePLScanRealSpace` instance).
+    :class:`~leman.loaders.ACImgSweep` instance).
 
     Parameters
     ----------
-    frames : list of np.ndarray or AttoCubePLScanRealSpace
+    frames : list of np.ndarray or ACImgSweep
         Image sequence.
     threshold, smooth_sigma, keep_largest, pixel_scale, scale_units, origin
         Forwarded to :func:`analyse_diffusion_cloud` for every frame.
@@ -447,11 +447,11 @@ def analyse_diffusion_sequence(
     DiffusionSequenceResult
     """
     # Support both a raw list of arrays and a scan object.
-    # AttoCubePLScanRealSpace.load_frame() returns the raw numeric array —
+    # ACImgSweep.load_frame() returns the raw numeric array —
     # background subtraction has NOT happened yet — so we can pass bg_region
     # straight through to analyse_diffusion_cloud.
     #
-    # If the caller passes a list of _AttoCubeImage instances that were
+    # If the caller passes a list of _ACImg instances that were
     # constructed with a bg_region, _load_image will use img_raw (the
     # un-subtracted array) and analyse_diffusion_cloud will apply bg_region
     # once.  There is therefore no double-subtraction risk in either path.
@@ -538,16 +538,16 @@ def _pixel_to_realspace(
 
 
 def _load_image(
-    image: np.ndarray | str | PathLike | _AttoCubeImage,
+    image: np.ndarray | str | PathLike | _ACImg,
 ) -> np.ndarray:
 
     if isinstance(image, (str, PathLike)):
         return np.loadtxt(image, delimiter=",")
 
-    if isinstance(image, _AttoCubeImage):
+    if isinstance(image, _ACImg):
         # Return the RAW image array so that any bg_region passed to
         # analyse_diffusion_cloud is the *only* place subtraction happens.
-        # _AttoCubeImage.img is already bg-subtracted when bg_region was
+        # _ACImg.img is already bg-subtracted when bg_region was
         # supplied at construction time; using img_raw here avoids a second
         # subtraction when the caller passes the same bg_region to this function.
         return np.asarray(image.img_raw, dtype=float)

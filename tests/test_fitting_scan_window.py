@@ -19,9 +19,9 @@ import warnings
 import numpy as np
 import pytest
 
-from tmdc_optics_tools import fitting
-from tmdc_optics_tools.loaders import (
-    AttoCubeSpectralSweep,
+from leman import fitting
+from leman.loaders import (
+    ACSpectralSweep,
     DeviceGeometry,
     StackLayer,
 )
@@ -56,7 +56,7 @@ def _lorentzian_sweeps() -> np.ndarray:
 def scan(tmp_path):
     path = tmp_path / "peak.csv"
     make_spectral_csv(path, roi1=_lorentzian_sweeps(), wavelength=WAVELENGTH_NM)
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL")
+    return ACSpectralSweep(str(path), spectra_type="PL")
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def field_scan(tmp_path):
         tmdc_stack=[StackLayer("MoSe2"), StackLayer("WSe2")],
         d_hbn_top=50.0, d_hbn_bottom=50.0,
     )
-    return AttoCubeSpectralSweep(str(path), spectra_type="PL",
+    return ACSpectralSweep(str(path), spectra_type="PL",
                                  geometry=geometry, gates=GATES,
                                  sweep="electric_field")
 

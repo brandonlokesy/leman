@@ -1,15 +1,15 @@
 # TODO
 
 ## Refactoring
-- ~~AttoCubePLVabScan needs a rename~~ → `AttoCubeSpectralSweep` (2026-07-30).
+- ~~ACPLVabScan needs a rename~~ → `ACSpectralSweep` (2026-07-30).
   Old name kept as a deprecated subclass emitting `FutureWarning`.
-- ~~AttoCubePLVabScan needs a rewrite~~ (2026-07-30)
+- ~~ACPLVabScan needs a rewrite~~ (2026-07-30)
     - ~~accept PL, R, RC etc. spectra~~ (2026-07-30) — `spectra_type=` is
       required, from `constants.SPECTROSCOPY_TYPES`, and drives `signal_label`.
       **R/RC now genuinely load**: reflectance uses the identical 4-column layout
       as PL, so it needed no parser work — only `reference=` and the contrast
       maths (`processing.spectral_contrast`). **TRPL loads too**, via
-      `AttoCubeTRPLSweep`. Absorption/cavity/BFP still have no loader.
+      `ACTRPLSweep`. Absorption/cavity/BFP still have no loader.
     - ~~check format/dimension of spectra files~~ — `_validate_payload`.
     - ~~verify only one gate is being used~~ — `gate_mode` reports
       dual/top-only/bottom-only and, for dual, whether the two are
@@ -41,7 +41,7 @@
   conversion decides nothing). With `out=` a directory run mirrors the source tree
   beneath it (`dev/decisions/0035-out-is-an-output-root-and-the-tree-is-mirrored.md`).
     - ~~Still owed: bulk spectral CSV → HDF5 on the command line~~ **done 2026-08-21.**
-      `convert_spectral_csv_to_hdf5` loads with `AttoCubeSpectralSweep` and writes
+      `convert_spectral_csv_to_hdf5` loads with `ACSpectralSweep` and writes
       with `hdf5.write_sweep`, so the package has one archive format and a converted
       sweep reopens in the loader — unlike the branch's private layout.
       `convert_trpl_dir_to_hdf5` collapses a directory of decays into one archive.
@@ -53,10 +53,10 @@
           each from its argument and only falls back to stored metadata.
         - A TRPL directory converts only when named, never when reached by
           `--recursive`: `dev/decisions/0033-a-trpl-directory-converts-only-when-named.md`.
-- AttoCubeRealSpace ...
+- ACImgSweep ...
     - Select the range of frames of interest -> work on a subset
     - ~~**File ordering is lexicographic** (A7)~~ **fixed 2026-08-07.**
-      `_order_by_iter` moved out of `AttoCubeTRPLSweep` to a module-level helper and
+      `_order_by_iter` moved out of `ACTRPLSweep` to a module-level helper and
       is now called by both loaders, gap warning included. Escaped notice only
       because the committed exports are zero-padded — and the padding *width* varies
       between them (4 digits in `position-scan/PL`, 6 in `position-scan/wl`), so it
