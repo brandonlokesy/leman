@@ -1750,81 +1750,6 @@ class DipoleResult:
         )
 
 
-def _prepare_dipole_data(
-    scan,
-    x_range      : tuple,
-    model        : str,
-    active_range : tuple,
-    baseline     : str = "constant",
-) -> tuple:
-    """
-    Shared setup for all dipole extraction methods.
-
-    Runs the per-sweep lineshape fits and constructs the masked arrays
-    (ef_fit, E_fit, sig_fit) ready for a linear fit.
-
-    Parameters
-    ----------
-    scan : AttoCubeSpectralSweep
-    x_range : tuple or None
-    model : str
-    active_range : tuple or None
-        Combined ef_range / Efield_range already resolved by the caller.
-    baseline : str
-        Baseline model forwarded to :func:`fit_scan_peak`.
-
-    Returns
-    -------
-    ef : np.ndarray
-        Full electric field array (all sweeps).
-    peak_energies : np.ndarray
-        Fitted peak centers (all sweeps, NaN where not converged).
-    peak_errors : np.ndarray
-        1-sigma uncertainties on peak centers (NaN where not converged or
-        where the covariance was unusable).
-    converged : np.ndarray of bool
-    ef_fit, E_fit, sig_fit : np.ndarray
-        Masked arrays for the linear fit (converged + within active_range).
-        sig_fit contains NaN where the covariance was unusable; each
-        linear fitter handles these internally.
-    """
-    sweep_mask = None
-    if active_range is not None:
-        sweep_mask = (scan.ef >= active_range[0]) & (scan.ef <= active_range[1])
-
-    # stacklevel=5: _window_slice, _fit_scan_peak, here, extract_dipole_length,
-    # the researcher's line.  Measured, not counted off the def lines.
-    fit_results   = _fit_scan_peak(
-        scan, x_axis="energy", x_range=x_range, model=model, stacklevel=5,
-        sweep_mask=sweep_mask, baseline=baseline,
-    )
-    peak_energies = np.array([r.params["center"] for r in fit_results])
-    peak_errors   = np.array([r.errors["center"]  for r in fit_results])
-    converged     = np.array([r.converged          for r in fit_results])
-
-    # Mark bad/zero errors as inf so they act as zero-weight points
-    peak_errors = np.where(
-        np.isfinite(peak_errors) & (peak_errors > 0), peak_errors, np.inf
-    )
-
-    ef   = scan.ef.copy()
-    mask = converged.copy()
-    if active_range is not None:
-        mask &= (ef >= active_range[0]) & (ef <= active_range[1])
-
-    if mask.sum() < 2:
-        raise ValueError(
-            f"Only {mask.sum()} usable sweep point(s) after applying field range "
-            f"and removing non-converged fits. Need at least 2."
-        )
-
-    # Restore inf → NaN for the returned full arrays (clean display)
-    peak_errors_out = np.where(np.isinf(peak_errors), np.nan, peak_errors)
-    # sig_fit passed to fitters: NaN where inf (each fitter handles it)
-    sig_fit = np.where(np.isinf(peak_errors[mask]), np.nan, peak_errors[mask])
-
-    return ef, peak_energies, peak_errors_out, converged, ef[mask], peak_energies[mask], sig_fit
-
 
 def _dipole_wls(
     ef_fit  : np.ndarray,
@@ -2159,60 +2084,26 @@ def extract_dipole_length(
     ... )
     >>> print(result)
     """
-    _METHODS = ("wls", "minmax", "bootstrap")
-    if method not in _METHODS:
-        raise ValueError(
-            f"method='{method}' is not recognised. Choose from {_METHODS}."
-        )
-
-    if scan.ef is None:
-        raise ValueError(
-            "scan.ef is None — supply a DeviceGeometry when loading the scan."
-        )
-
     active_range = Efield_range if Efield_range is not None else ef_range
 
-    # --- Shared setup: lineshape fits + masking ---
-    ef, peak_energies, peak_errors, converged, ef_fit, E_fit, sig_fit = (
-        _prepare_dipole_data(scan, x_range, model, active_range, baseline)
+    track = track_peak_energies(
+        scan, method="fit", x_range=x_range,
+        model=model, baseline=baseline,
+        _stacklevel=5,
     )
 
-    # --- Linear fit: dispatch to chosen method ---
-    if method == "wls":
-        slope, slope_err, intercept, intercept_err = _dipole_wls(
-            ef_fit, E_fit, sig_fit
-        )
-    elif method == "minmax":
-        slope, slope_err, intercept, intercept_err = _dipole_minmax(
-            ef_fit, E_fit, sig_fit
-        )
-    else:  # bootstrap
-        slope, slope_err, intercept, intercept_err = _dipole_bootstrap(
-            ef_fit, E_fit, sig_fit, n_bootstrap=n_bootstrap, rng=rng,
-        )
+    if active_range is not None:
+        ef_ranges    = [active_range]
+        index_ranges = None
+    else:
+        ef_ranges    = None
+        index_ranges = [(0, len(track.peak_energies) - 1)]
 
-    # --- Derived quantities ---
-    r_squared         = _r_squared(E_fit, slope * ef_fit + intercept)
-    dipole_length     = abs(slope) * 1000.0
-    dipole_length_err = abs(slope_err) * 1000.0 if np.isfinite(slope_err) else np.nan
-
-    return DipoleResult(
-        ef                     = ef,
-        peak_energies          = peak_energies,
-        peak_errors            = peak_errors,
-        slope                  = slope,
-        slope_err              = slope_err,
-        intercept              = intercept,
-        intercept_err          = intercept_err,
-        dipole_length          = dipole_length,
-        dipole_length_err      = dipole_length_err,
-        dipole_length_angstrom = dipole_length * 10.0,
-        r_squared              = r_squared,
-        peak_model             = _model_label(model, _resolve_baseline(baseline)[0]),
-        converged_mask         = converged,
-        method                 = method,
-        n_bootstrap            = n_bootstrap if method == "bootstrap" else None,
+    result = extract_dipole_lengths(
+        track, ef_ranges=ef_ranges, index_ranges=index_ranges,
+        fit_method=method, n_bootstrap=n_bootstrap, rng=rng,
     )
+    return result.segments[0]
 
 
 # ---------------------------------------------------------------------------
@@ -2288,6 +2179,8 @@ def track_peak_energies(
     x_range  : tuple = None,
     model    : str   = "lorentzian",
     baseline : str   = "constant",
+    *,
+    _stacklevel : int = 4,
 ) -> PeakTrack:
     """
     Track the peak emission energy at every sweep point.
@@ -2352,7 +2245,7 @@ def track_peak_energies(
         results = _fit_scan_peak(
             scan, x_axis="energy", x_range=x_range,
             model=model, sweep_mask=None, baseline=baseline,
-            stacklevel=4,
+            stacklevel=_stacklevel,
         )
         peak_energies   = np.array([r.params["center"] for r in results])
         peak_amplitudes = np.array([r.params["amplitude"] for r in results])
@@ -2639,6 +2532,24 @@ def _extract_linear_fits(
         x_fit   = x_values[mask]
         y_fit   = y_values[mask]
         sig_fit = y_errors[mask]
+
+        # Drop points where x or y is NaN (e.g. non-converged lineshape
+        # fits).  The mask is kept at its original size so it still
+        # indexes the full sweep.
+        finite = np.isfinite(x_fit) & np.isfinite(y_fit)
+        if finite.sum() < 2:
+            warnings.warn(
+                f"Range {i} has only {finite.sum()} finite point(s) "
+                f"after removing NaN; need at least 2 for a linear fit.",
+                UserWarning, stacklevel=stacklevel,
+            )
+            segments.append(_LinearSegment(
+                slope=np.nan, slope_err=np.nan,
+                intercept=np.nan, intercept_err=np.nan,
+                r_squared=np.nan, mask=mask,
+            ))
+            continue
+        x_fit, y_fit, sig_fit = x_fit[finite], y_fit[finite], sig_fit[finite]
 
         try:
             if fit_method == "wls":

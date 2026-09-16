@@ -454,7 +454,7 @@ class TestExtractDipoleLengths:
             converged=np.ones(5, dtype=bool),
             method="argmax",
         )
-        with pytest.warns(UserWarning, match="failed"):
+        with pytest.warns(UserWarning, match="finite point"):
             result = extract_dipole_lengths(
                 track,
                 index_ranges=[(0, 1), (2, 4)],
