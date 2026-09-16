@@ -240,7 +240,7 @@ result = fitting.extract_dipole_length(
     scan,                          # background declared at load, as in §5
     x_range      = (1.30, 1.42),   # eV — spectral window for peak fitting
     model        = "lorentzian",
-    Efield_range = (-8, 8),        # mV/nm — restrict to linear Stark regime
+    ef_range     = (-8, 8),        # mV/nm — restrict to linear Stark regime
     baseline     = "constant",     # the default, passed to every peak fit
 )
 print(result)

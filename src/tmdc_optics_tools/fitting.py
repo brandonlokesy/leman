@@ -1967,7 +1967,6 @@ def extract_dipole_length(
     x_range      : tuple = None,
     model        : str   = "lorentzian",
     ef_range     : tuple = None,
-    Efield_range : tuple = None,
     method       : str   = "wls",
     n_bootstrap  : int   = 2000,
     rng          : np.random.Generator = None,
@@ -2008,8 +2007,6 @@ def extract_dipole_length(
         homogeneously broadened excitons.
     ef_range : tuple of (F_min, F_max) in mV/nm, optional
         Restrict the linear fit to this field range.
-    Efield_range : tuple of (F_min, F_max) in mV/nm, optional
-        Alias for *ef_range*. Takes precedence if both are supplied.
     method : {"wls", "minmax", "bootstrap"}
         Linear-fit method used to extract the slope and its uncertainty:
 
@@ -2084,7 +2081,7 @@ def extract_dipole_length(
     ... )
     >>> print(result)
     """
-    active_range = Efield_range if Efield_range is not None else ef_range
+    active_range = ef_range
 
     track = track_peak_energies(
         scan, method="fit", x_range=x_range,
