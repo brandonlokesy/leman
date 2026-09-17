@@ -38,15 +38,16 @@ class Lin2024ProcessorWSe2(Processor):
             energy = mat['pl_eV'].squeeze().astype(np.float64)
             spectra = mat["RC"].squeeze().astype(np.float64)
 
-            hf.create_dataset('energy', data = energy)
-            hf.create_dataset('spectra', data=spectra)
+            self._write_single_spectrum(
+                hf, energy, "energy", "eV", "Energy", spectra, "arb. u.",
+            )
 
         print(f"  -> Saved to {self.out_path}")
 
 class Lin2024ProcessorMoS2(Processor):
     """
     Processor for Lin et al., Nature Communications 2024.
-    
+
     - Title: Moiré-engineered light-matter interactions in MoS2/WSe2 heterobilayers at room temperature
     - DOI: 10.1038/s41467-024-53083-x
     - Dataset: 10.5281/zenodo.13629283
@@ -71,8 +72,9 @@ class Lin2024ProcessorMoS2(Processor):
             energy = mat['pl_eV'].squeeze().astype(np.float64)
             spectra = mat["RC"].squeeze().astype(np.float64)
 
-            hf.create_dataset('energy', data = energy)
-            hf.create_dataset('spectra', data=spectra)
+            self._write_single_spectrum(
+                hf, energy, "energy", "eV", "Energy", spectra, "arb. u.",
+            )
 
         print(f"  -> Saved to {self.out_path}")
 

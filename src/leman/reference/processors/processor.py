@@ -1,14 +1,19 @@
 # src/leman/reference/processor.py
 
+import datetime
 import io
 import requests
 import zipfile
 import ftplib, ssl
+import numpy as np
 import h5py
 from pathlib import Path
 from abc import ABC, abstractmethod
 
 HEADERS = {"User-Agent": "LANES-Tools/1.0"}
+
+REF_FORMAT_NAME = "leman.reference"
+REF_FORMAT_VERSION = "1.0"
 
 # Keys that must be present in every registry entry
 _REQUIRED_META_KEYS = ("material", "source", "title", "doi", "dataset_doi")
@@ -115,13 +120,202 @@ class Processor(ABC):
         Call this once at the top of every processor's :meth:`run` method,
         immediately after opening the file, before creating any groups.
         """
-        hf.attrs["material"]    = self.meta["material"]
-        hf.attrs["source"]      = self.meta["source"]
-        hf.attrs["title"]       = self.meta["title"]
-        hf.attrs["doi"]         = self.meta["doi"]
-        hf.attrs["dataset_doi"] = self.meta["dataset_doi"]
-        hf.attrs["about"]       = self.meta.get("about", "")
-        hf.attrs["spectroscopy"] = self.meta.get("spectroscopy", "PL")
+        from ... import __version__
+
+        hf.attrs["format"]          = REF_FORMAT_NAME
+        hf.attrs["format_version"]  = REF_FORMAT_VERSION
+        hf.attrs["created"]         = datetime.datetime.now().astimezone().isoformat()
+        hf.attrs["toolkit_version"] = __version__
+        hf.attrs["material"]        = self.meta["material"]
+        hf.attrs["source"]          = self.meta["source"]
+        hf.attrs["title"]           = self.meta["title"]
+        hf.attrs["doi"]             = self.meta["doi"]
+        hf.attrs["dataset_doi"]     = self.meta["dataset_doi"]
+        hf.attrs["about"]           = self.meta.get("about", "")
+        hf.attrs["spectroscopy"]    = self.meta.get("spectroscopy", "PL")
+
+    # ------------------------------------------------------------------
+    # Schema helpers — write the ``leman.reference`` v1.0 layouts
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _write_provenance(
+        hf: h5py.File, summary: str, **extra
+    ) -> None:
+        """
+        Write an optional provenance group with free-form attributes.
+
+        Parameters
+        ----------
+        hf      : open HDF5 file
+        summary : one-line description of the processing pipeline
+        **extra : processor-specific attributes (e.g. ``smooth_kernel=3``)
+        """
+        grp = hf.create_group("provenance")
+        grp.attrs["pipeline_summary"] = summary
+        for key, value in extra.items():
+            grp.attrs[key] = value
+
+    @staticmethod
+    def _write_single_spectrum(
+        hf: h5py.File,
+        axis_values: np.ndarray,
+        axis_name: str,
+        axis_units: str,
+        axis_label: str,
+        intensity: np.ndarray,
+        intensity_units: str,
+    ) -> None:
+        """
+        Write layout A (single spectrum, no sweep parameter).
+
+        Parameters
+        ----------
+        hf              : open HDF5 file (metadata already written)
+        axis_values     : 1-D spectral axis (energy or wavelength)
+        axis_name       : ``"energy"`` or ``"wavelength"``
+        axis_units      : ``"eV"`` or ``"nm"``
+        axis_label      : display label, e.g. ``"Energy"``
+        intensity       : 1-D signal array, same length as *axis_values*
+        intensity_units : ``"counts"``, ``"arb. u."``, ``"dimensionless"``, etc.
+        """
+        axis_values = np.asarray(axis_values, dtype=np.float64)
+        intensity = np.asarray(intensity, dtype=np.float64)
+        if axis_values.shape != intensity.shape:
+            raise ValueError(
+                f"Axis and intensity shapes differ: "
+                f"{axis_values.shape} vs {intensity.shape}"
+            )
+
+        axes = hf.create_group("axes")
+        ds = axes.create_dataset(axis_name, data=axis_values)
+        ds.attrs["units"] = axis_units
+        ds.attrs["label"] = axis_label
+
+        spectra = hf.create_group("spectra")
+        ds = spectra.create_dataset("intensity", data=intensity)
+        ds.attrs["units"] = intensity_units
+
+    @staticmethod
+    def _write_1d_sweep(
+        hf: h5py.File,
+        axis_values: np.ndarray,
+        axis_name: str,
+        axis_units: str,
+        axis_label: str,
+        sweep_values: np.ndarray,
+        sweep_name: str,
+        sweep_units: str,
+        sweep_label: str,
+        default_index: int,
+        intensity_2d: np.ndarray,
+        intensity_units: str,
+    ) -> None:
+        """
+        Write layout B (1-D sweep).
+
+        Parameters
+        ----------
+        hf              : open HDF5 file (metadata already written)
+        axis_values     : 1-D spectral axis, length *n_pixels*
+        axis_name       : ``"energy"`` or ``"wavelength"``
+        axis_units      : ``"eV"`` or ``"nm"``
+        axis_label      : display label
+        sweep_values    : 1-D sweep parameter, length *n_sweeps*
+        sweep_name      : e.g. ``"gate_voltage"``
+        sweep_units     : e.g. ``"V"``
+        sweep_label     : display label, e.g. ``"Gate voltage"``
+        default_index   : index into *sweep_values* for the default spectrum
+        intensity_2d    : ``(n_pixels, n_sweeps)`` signal array
+        intensity_units : signal units
+        """
+        axis_values = np.asarray(axis_values, dtype=np.float64)
+        sweep_values = np.asarray(sweep_values, dtype=np.float64)
+        intensity_2d = np.asarray(intensity_2d, dtype=np.float64)
+        expected = (axis_values.shape[0], sweep_values.shape[0])
+        if intensity_2d.shape != expected:
+            raise ValueError(
+                f"Intensity shape {intensity_2d.shape} does not match "
+                f"(n_pixels, n_sweeps) = {expected}"
+            )
+
+        axes = hf.create_group("axes")
+        ds = axes.create_dataset(axis_name, data=axis_values)
+        ds.attrs["units"] = axis_units
+        ds.attrs["label"] = axis_label
+
+        sweep = hf.create_group("sweep")
+        ds = sweep.create_dataset("values", data=sweep_values)
+        ds.attrs["name"] = sweep_name
+        ds.attrs["units"] = sweep_units
+        ds.attrs["label"] = sweep_label
+        sweep.create_dataset("default_index", data=np.int64(default_index))
+
+        spectra = hf.create_group("spectra")
+        ds = spectra.create_dataset("intensity", data=intensity_2d)
+        ds.attrs["units"] = intensity_units
+        ds.attrs["axes"] = f"{axis_name}, sweep"
+
+    @staticmethod
+    def _write_nested_sweep(
+        hf: h5py.File,
+        conditions: list[dict],
+        sweep_meta: dict,
+    ) -> None:
+        """
+        Write layout C (nested sweep with per-condition axes).
+
+        Parameters
+        ----------
+        hf         : open HDF5 file (metadata already written)
+        conditions : one dict per outer condition, each with keys:
+            ``axis_values``, ``axis_name``, ``axis_units``, ``axis_label``,
+            ``inner_values``, ``inner_name``, ``inner_units``, ``inner_label``,
+            ``default_index``, ``intensity_2d``, ``intensity_units``,
+            ``outer_value``, ``is_default``
+        sweep_meta : dict with ``outer_name``, ``outer_units``,
+            ``outer_label``, ``default_value``
+        """
+        meta_grp = hf.create_group("sweep_meta")
+        meta_grp.attrs["outer_name"] = sweep_meta["outer_name"]
+        meta_grp.attrs["outer_units"] = sweep_meta["outer_units"]
+        meta_grp.attrs["outer_label"] = sweep_meta["outer_label"]
+        meta_grp.attrs["default_value"] = float(sweep_meta["default_value"])
+
+        cond_root = hf.create_group("conditions")
+        for i, cond in enumerate(conditions):
+            axis_values = np.asarray(cond["axis_values"], dtype=np.float64)
+            inner_values = np.asarray(cond["inner_values"], dtype=np.float64)
+            intensity_2d = np.asarray(cond["intensity_2d"], dtype=np.float64)
+
+            expected = (axis_values.shape[0], inner_values.shape[0])
+            if intensity_2d.shape != expected:
+                raise ValueError(
+                    f"Condition {i}: intensity shape {intensity_2d.shape} "
+                    f"does not match (n_pixels, n_inner) = {expected}"
+                )
+
+            grp = cond_root.create_group(str(i))
+            grp.attrs["outer_value"] = float(cond["outer_value"])
+            grp.attrs["is_default"] = bool(cond["is_default"])
+
+            axes = grp.create_group("axes")
+            ds = axes.create_dataset(cond["axis_name"], data=axis_values)
+            ds.attrs["units"] = cond["axis_units"]
+            ds.attrs["label"] = cond["axis_label"]
+
+            sweep = grp.create_group("sweep")
+            ds = sweep.create_dataset("values", data=inner_values)
+            ds.attrs["name"] = cond["inner_name"]
+            ds.attrs["units"] = cond["inner_units"]
+            ds.attrs["label"] = cond["inner_label"]
+            sweep.create_dataset(
+                "default_index", data=np.int64(cond["default_index"])
+            )
+
+            spectra = grp.create_group("spectra")
+            ds = spectra.create_dataset("intensity", data=intensity_2d)
+            ds.attrs["units"] = cond["intensity_units"]
 
     # ------------------------------------------------------------------
     # Interface

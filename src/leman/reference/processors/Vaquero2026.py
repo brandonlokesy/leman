@@ -1,14 +1,8 @@
 import io
-import requests
-import zipfile
 import numpy as np
-import scipy.io
 import h5py
-from pathlib import Path
 import pandas as pd
 from .processor import Processor
-
-HEADERS = {"User-Agent": "LANES-Tools/1.0"}
 
 class Vaquero2026Processor(Processor):
     """
@@ -33,56 +27,57 @@ class Vaquero2026Processor(Processor):
         filepath = "Zenodo_repository/figure_2/panel_a/fig_2a.csv"
         DEFAULT_EXCITON_DENSITY_CM2 = 1e12  # cm^-2, nearest available index used per file
 
+        print(f"  Processing file...")
+
+        with z.open(filepath) as f:
+            df = pd.read_csv(io.BytesIO(f.read()), header=[0, 1])
+            new_columns = []
+            current_density = None
+
+            for density, label in df.columns:
+                if not density.startswith("Unnamed"):
+                    current_density = density
+                new_columns.append((current_density, label))
+
+            df.columns = pd.MultiIndex.from_tuples(new_columns)
+
+            density_strings = []
+            for density, _ in df.columns:
+                if density not in density_strings:
+                    density_strings.append(density)
+
+            densities = [self.parse_density(d) for d in density_strings]
+
+            default_density_idx = int(np.argmin(
+                np.abs(np.array(densities) - DEFAULT_EXCITON_DENSITY_CM2)
+            ))
+
+            all_counts = []
+            energy = None
+            for density_str in density_strings:
+                if energy is None:
+                    energy = df[density_str].iloc[:, 0].to_numpy()
+                all_counts.append(df[density_str].iloc[:, 1].to_numpy())
+
+            # (n_pixels, n_sweeps)
+            intensity_2d = np.column_stack(all_counts)
+
         with h5py.File(self.out_path, "w") as hf:
-            # --- File-level metadata ---
             self._write_metadata(hf)
 
+            self._write_1d_sweep(
+                hf,
+                axis_values=energy,
+                axis_name="energy",
+                axis_units="eV",
+                axis_label="Energy",
+                sweep_values=np.array(densities),
+                sweep_name="exciton_density",
+                sweep_units="cm^-2",
+                sweep_label="Exciton density",
+                default_index=default_density_idx,
+                intensity_2d=intensity_2d,
+                intensity_units="counts",
+            )
 
-            nI_sweep = hf.create_group("exciton_density")
-            nI_sweep.attrs["parameter_name"] = "exciton_density"
-            nI_sweep.attrs["parameter_unit"] = "cm^-2" 
-            nI_sweep.attrs["default_value"] = float(DEFAULT_EXCITON_DENSITY_CM2)
-
-            print(f"Processing file...")
-            
-            with z.open(filepath) as f:
-                df = pd.read_csv(io.BytesIO(f.read()), header=[0, 1])
-                new_columns = []
-                current_density = None
-
-                for density, label in df.columns:
-                    if not density.startswith("Unnamed"):
-                        current_density = density
-                    new_columns.append((current_density, label))
-
-                df.columns = pd.MultiIndex.from_tuples(new_columns)
-
-                density_strings = []   # ordered unique strings, as they appear left-to-right
-                for density, _ in df.columns:
-                    if density not in density_strings:
-                        density_strings.append(density)
-
-                densities = [self.parse_density(d) for d in density_strings]
-                labels    = [f"{d/1e12:g}e12" for d in densities]
-
-                default_density_idx = np.argmin(
-                    np.abs(np.array(densities) - DEFAULT_EXCITON_DENSITY_CM2)
-                )
-
-                for i, density_str in enumerate(density_strings):   # ← iterate the ordered list
-                    energy = df[density_str].iloc[:, 0].to_numpy()
-                    counts = df[density_str].iloc[:, 1].to_numpy()
-
-                    grp = nI_sweep.create_group(labels[i])
-
-                    grp.attrs["parameter_value"] = densities[i]
-                    grp.attrs["density_index"] = i
-                    grp.attrs["spectrum_unit"] = "counts"
-                    grp.attrs["is_default"] = (i == default_density_idx)
-
-                    if i == 0:
-                        nI_sweep.create_dataset("energy", data=energy)
-
-                    grp.create_dataset("counts", data=counts)
-        
         print(f"  -> Saved to {self.out_path}")

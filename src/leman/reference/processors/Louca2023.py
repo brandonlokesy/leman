@@ -13,8 +13,9 @@ class Louca2023Processor(Processor):
     """
     def run(self):
         url = "https://archive.materialscloud.org/records/q0deg-ag137/files/Fig1c.xlsx?download=1"
+        print(f"Fetching data from {url} from Materials Cloud.")
 
-        df = pd.read_csv(url)
+        df = pd.read_excel(url)
 
         energy = df['Energy (eV)']
         spectra = df['RC']
@@ -22,5 +23,10 @@ class Louca2023Processor(Processor):
         with h5py.File(self.out_path, "w") as hf:
             self._write_metadata(hf)
 
-            hf.create_dataset('energy', data = energy)
-            hf.create_dataset('spectra', data = spectra)
+            self._write_single_spectrum(
+                hf,
+                energy.to_numpy(), "energy", "eV", "Energy",
+                spectra.to_numpy(), "dimensionless",
+            )
+
+        print(f"  -> Saved to {self.out_path}")
