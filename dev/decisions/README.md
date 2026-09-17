@@ -138,5 +138,6 @@ Ordered by number, which is allocation order — see the `Date` column for chron
 | [0037](0037-beside-is-shorthand-not-a-placement-rule.md) | `beside=` is shorthand for one `out=`, not a third placement rule | 2026-08-22 | Accepted |
 | [0038](0038-the-spectral-machinery-is-not-per-instrument.md) | A sweep of spectra gets its own base, and it has no `__init__` | 2026-08-26 | Accepted |
 | [0039](0039-an-unnamed-row-beats-a-guessed-one.md) | An unnamed parameter row beats a guessed one, and one signal beats a fictional pair | 2026-08-26 | Accepted |
+| [0040](0040-reference-hdf5-has-a-schema.md) | Reference HDF5 files use a versioned schema with three layouts | 2026-09-17 | Accepted |
 
 This table is the one mutable part of the folder.

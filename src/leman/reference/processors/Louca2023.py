@@ -23,7 +23,10 @@ class Louca2023Processor(Processor):
         with h5py.File(self.out_path, "w") as hf:
             self._write_metadata(hf)
 
-            hf.create_dataset('energy', data = energy)
-            hf.create_dataset('spectra', data = spectra)
+            self._write_single_spectrum(
+                hf,
+                energy.to_numpy(), "energy", "eV", "Energy",
+                spectra.to_numpy(), "dimensionless",
+            )
 
         print(f"  -> Saved to {self.out_path}")

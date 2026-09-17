@@ -8,13 +8,22 @@ from typing import Optional
 
 DATA_DIR = Path(__file__).parent / "data"
 
+from ..constants import SPECTROSCOPY_TYPES
+from .processors.processor import REF_FORMAT_NAME, REF_FORMAT_VERSION
+
+_REF_FORMAT_MAJOR = REF_FORMAT_VERSION.split(".")[0]
+
+
 # ---------------------------------------------------------------------------
-# Controlled vocabulary for spectroscopy types
+# Helpers
 # ---------------------------------------------------------------------------
 
-# Defined in constants.py and re-exported here: the AttoCube loaders record the
-# same tags per scan, and a vocabulary that exists in two places drifts.
-from ..constants import SPECTROSCOPY_TYPES
+def _as_str(value):
+    """Decode HDF5 bytes to str; pass through str and None unchanged."""
+    if value is None:
+        return None
+    return value.decode() if isinstance(value, bytes) else str(value)
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -23,17 +32,17 @@ from ..constants import SPECTROSCOPY_TYPES
 @dataclass
 class Spectrum:
     """
-    Standardised container for a single spectrum.
+    A single reference spectrum.
 
     Attributes
     ----------
     energy          : photon energy axis (eV)
-    intensity       : raw intensity counts
-    label           : human-readable label, e.g. "E=+300, 40.0 µW"
+    intensity       : signal values
+    label           : human-readable label
     spectroscopy    : measurement type, one of SPECTROSCOPY_TYPES
-    energy_unit     : unit of energy axis (default "eV")
-    intensity_unit  : unit of intensity axis (default "counts")
-    parameter_value : value of the sweep parameter this spectrum was taken at
+    energy_unit     : unit of the energy axis
+    intensity_unit  : unit of the intensity axis
+    parameter_value : sweep parameter value this spectrum was taken at
     is_default      : whether this is the canonical spectrum for its sweep
     """
     energy:          np.ndarray
@@ -74,7 +83,6 @@ class SweepSeries:
             raise ValueError(f"No default set for sweep '{self.parameter_name}'")
         if self.default_value in self.spectra:
             return self.spectra[self.default_value]
-        # Nearest-key fallback for float round-trip drift
         nearest = min(self.spectra.keys(), key=lambda k: abs(k - self.default_value))
         return self.spectra[nearest]
 
@@ -100,7 +108,7 @@ class FieldCondition:
     ----------
     parameter_value : value of the outer sweep parameter, e.g. 300.0
     parameter_unit  : unit of the outer sweep parameter, e.g. "mV/nm"
-    energy          : photon energy axis (eV), trimmed per authors' choice
+    energy          : photon energy axis (eV), may differ per condition
     energy_unit     : unit of energy axis
     is_default      : whether this is the default outer condition
     sweeps          : {sweep_name: SweepSeries} — inner sweeps, e.g. "power"
@@ -127,15 +135,14 @@ class ReferenceDataset:
 
     Attributes
     ----------
-    material      : e.g. "WSe2_bilayer"
+    material      : e.g. "2L_WSe2"
     source        : e.g. "Tagarelli2023"
     doi           : publication DOI
     dataset_doi   : Zenodo record DOI
     title         : full paper title
-    about       : any notes added in the registry
+    about         : description from the registry
     spectroscopy  : measurement type, one of SPECTROSCOPY_TYPES
-    sweeps        : {sweep_name: SweepSeries} for flat datasets, or
-                    outer-level sweep for nested datasets
+    sweeps        : {sweep_name: SweepSeries}
     """
     material:     str
     source:       str
@@ -145,6 +152,25 @@ class ReferenceDataset:
     about:        str  = ""
     spectroscopy: str  = "PL"
     sweeps:       dict = field(default_factory=dict)
+    _single_spectrum: Optional[Spectrum] = field(
+        default=None, repr=False, compare=False,
+    )
+
+    @property
+    def spectrum(self) -> Spectrum:
+        """The single spectrum, for non-sweep references.
+
+        Raises
+        ------
+        AttributeError
+            If this dataset contains sweeps rather than a single spectrum.
+        """
+        if self._single_spectrum is None:
+            raise AttributeError(
+                "This dataset contains sweeps, not a single spectrum. "
+                "Use ref['sweep_name'] instead."
+            )
+        return self._single_spectrum
 
     def default_spectrum(self, sweep_name: str) -> Spectrum:
         """Return the default spectrum for a named sweep."""
@@ -154,14 +180,17 @@ class ReferenceDataset:
         return self.sweeps[sweep_name]
 
     def __repr__(self):
-        sweep_summary = {k: len(v.spectra) for k, v in self.sweeps.items()}
+        if self._single_spectrum is not None:
+            sweep_line = "single spectrum"
+        else:
+            sweep_summary = {k: len(v.spectra) for k, v in self.sweeps.items()}
+            sweep_line = f"sweeps={sweep_summary}"
         return (
             f"ReferenceDataset("
             f"material={self.material!r}, "
             f"source={self.source!r}, "
             f"spectroscopy={self.spectroscopy!r}, "
-            f"sweeps={sweep_summary})\n\n"
-
+            f"{sweep_line})\n\n"
             f"{'Title':<12}: {self.title}\n"
             f"{'Source':<12}: {self.source}\n"
             f"{'DOI':<12}: {self.doi}\n"
@@ -172,81 +201,154 @@ class ReferenceDataset:
 
 
 # ---------------------------------------------------------------------------
-# Loader
+# Layout readers
 # ---------------------------------------------------------------------------
 
-SPECTRUM_KEYS = ("spectrum", "counts")
+def _read_axis(group: h5py.Group):
+    """Read the single dataset inside an ``axes/`` group.
 
-def _find_energy(group: h5py.Group) -> np.ndarray:
-    """Walk up the HDF5 hierarchy to find the nearest 'energy' dataset."""
-    node = group
-    while node is not None:
-        if "energy" in node:
-            return node["energy"][:]
-        if node.name == "/":
-            break
-        node = node.parent
-    return np.array([])
+    Returns (values, name, unit).
+    """
+    names = list(group.keys())
+    if len(names) != 1:
+        raise ValueError(
+            f"Expected exactly one axis dataset, got {names}"
+        )
+    name = names[0]
+    ds = group[name]
+    return ds[:].astype(np.float64), name, _as_str(ds.attrs.get("units", ""))
 
-def _read_sweep(group: h5py.Group, spectroscopy: str) -> SweepSeries:
-    parameter_name = group.attrs.get("parameter_name", group.name.split("/")[-1])
-    parameter_unit = group.attrs.get("parameter_unit", "")
-    default_value  = group.attrs.get("default_value", None)
 
-    spectra = {}
-
-    for key in group.keys():
-        subgroup = group[key]
-
-        if isinstance(subgroup, h5py.Dataset):
-            continue
-
-        spectrum_key = next((k for k in SPECTRUM_KEYS if k in subgroup), None)
-
-        if spectrum_key is not None:
-            energy = _find_energy(subgroup)
-
-            param_val = float(subgroup.attrs.get("parameter_value", float(key)))
-            spectrum  = Spectrum(
-                energy          = energy,
-                intensity       = subgroup[spectrum_key][:],
-                label           = key,
-                spectroscopy    = spectroscopy,
-                energy_unit     = subgroup.attrs.get("energy_unit", "eV"),
-                intensity_unit  = subgroup.attrs.get("spectrum_unit", "counts"),
-                parameter_value = param_val,
-                is_default      = bool(subgroup.attrs.get("is_default", False)),
-            )
-            spectra[param_val] = spectrum
-
-        else:
-
-            inner_sweeps = {}
-            for inner_key in subgroup.keys():
-                if inner_key == "energy":
-                    continue
-                inner_sweeps[inner_key] = _read_sweep(subgroup[inner_key], spectroscopy)
-
-            param_val = float(subgroup.attrs.get("parameter_value", float(key)))
-            energy    = subgroup["energy"][:] if "energy" in subgroup else np.array([])
-
-            condition = FieldCondition(
-                parameter_value = param_val,
-                parameter_unit  = parameter_unit,
-                energy          = energy,
-                energy_unit     = subgroup.attrs.get("energy_unit", "eV"),
-                is_default      = bool(subgroup.attrs.get("is_default", False)),
-                sweeps          = inner_sweeps,
-            )
-            spectra[param_val] = condition
-
-    return SweepSeries(
-        parameter_name = parameter_name,
-        parameter_unit = parameter_unit,
-        spectra        = spectra,
-        default_value  = float(default_value) if default_value is not None else None,
+def _load_single(hf: h5py.File, dataset: ReferenceDataset) -> None:
+    """Load layout A (single spectrum) into *dataset*."""
+    x_values, axis_name, x_unit = _read_axis(hf["axes"])
+    intensity = hf["spectra/intensity"][:].astype(np.float64)
+    intensity_unit = _as_str(
+        hf["spectra/intensity"].attrs.get("units", "counts")
     )
 
+    sp = Spectrum(
+        energy=x_values,
+        intensity=intensity,
+        spectroscopy=dataset.spectroscopy,
+        energy_unit=x_unit,
+        intensity_unit=intensity_unit,
+    )
+
+    dataset._single_spectrum = sp
+    dataset.sweeps["spectrum"] = SweepSeries(
+        parameter_name="none",
+        parameter_unit="",
+        spectra={0: sp},
+        default_value=0,
+    )
+
+
+def _load_1d_sweep(hf: h5py.File, dataset: ReferenceDataset) -> None:
+    """Load layout B (1-D sweep) into *dataset*."""
+    x_values, axis_name, x_unit = _read_axis(hf["axes"])
+
+    sweep_ds = hf["sweep/values"]
+    sweep_vals = sweep_ds[:].astype(np.float64)
+    sweep_name = _as_str(sweep_ds.attrs.get("name", "sweep"))
+    sweep_unit = _as_str(sweep_ds.attrs.get("units", ""))
+    default_idx = int(hf["sweep/default_index"][()])
+
+    intensity_2d = hf["spectra/intensity"][:].astype(np.float64)
+    intensity_unit = _as_str(
+        hf["spectra/intensity"].attrs.get("units", "counts")
+    )
+
+    spectra = {}
+    for i, sv in enumerate(sweep_vals):
+        spectra[float(sv)] = Spectrum(
+            energy=x_values,
+            intensity=intensity_2d[:, i],
+            label=f"{sv}",
+            spectroscopy=dataset.spectroscopy,
+            energy_unit=x_unit,
+            intensity_unit=intensity_unit,
+            parameter_value=float(sv),
+            is_default=(i == default_idx),
+        )
+
+    dataset.sweeps[sweep_name] = SweepSeries(
+        parameter_name=sweep_name,
+        parameter_unit=sweep_unit,
+        spectra=spectra,
+        default_value=float(sweep_vals[default_idx]),
+    )
+
+
+def _load_nested(hf: h5py.File, dataset: ReferenceDataset) -> None:
+    """Load layout C (nested sweep) into *dataset*."""
+    meta = hf["sweep_meta"]
+    outer_name = _as_str(meta.attrs["outer_name"])
+    outer_unit = _as_str(meta.attrs["outer_units"])
+    outer_default = float(meta.attrs["default_value"])
+
+    cond_root = hf["conditions"]
+    conditions = {}
+
+    for idx_str in sorted(cond_root.keys(), key=int):
+        grp = cond_root[idx_str]
+        outer_value = float(grp.attrs["outer_value"])
+        is_default = bool(grp.attrs["is_default"])
+
+        x_values, axis_name, x_unit = _read_axis(grp["axes"])
+
+        inner_ds = grp["sweep/values"]
+        inner_vals = inner_ds[:].astype(np.float64)
+        inner_name = _as_str(inner_ds.attrs.get("name", "sweep"))
+        inner_unit = _as_str(inner_ds.attrs.get("units", ""))
+        inner_default_idx = int(grp["sweep/default_index"][()])
+
+        intensity_2d = grp["spectra/intensity"][:].astype(np.float64)
+        intensity_unit = _as_str(
+            grp["spectra/intensity"].attrs.get("units", "counts")
+        )
+
+        inner_spectra = {}
+        for i, iv in enumerate(inner_vals):
+            inner_spectra[float(iv)] = Spectrum(
+                energy=x_values,
+                intensity=intensity_2d[:, i],
+                label=f"{iv}",
+                spectroscopy=dataset.spectroscopy,
+                energy_unit=x_unit,
+                intensity_unit=intensity_unit,
+                parameter_value=float(iv),
+                is_default=(i == inner_default_idx),
+            )
+
+        inner_sweep = SweepSeries(
+            parameter_name=inner_name,
+            parameter_unit=inner_unit,
+            spectra=inner_spectra,
+            default_value=float(inner_vals[inner_default_idx]),
+        )
+
+        condition = FieldCondition(
+            parameter_value=outer_value,
+            parameter_unit=outer_unit,
+            energy=x_values,
+            energy_unit=x_unit,
+            is_default=is_default,
+            sweeps={inner_name: inner_sweep},
+        )
+        conditions[outer_value] = condition
+
+    dataset.sweeps[outer_name] = SweepSeries(
+        parameter_name=outer_name,
+        parameter_unit=outer_unit,
+        spectra=conditions,
+        default_value=outer_default,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
 def load_reference(material: str, source: str) -> ReferenceDataset:
     """
@@ -254,8 +356,10 @@ def load_reference(material: str, source: str) -> ReferenceDataset:
 
     Parameters
     ----------
-    material : str — e.g. "WSe2_bilayer"
-    source   : str — e.g. "Tagarelli2023"
+    material : str
+        Material identifier, e.g. ``"2L_WSe2"``.
+    source : str
+        First-author-year citation key, e.g. ``"Tagarelli2023"``.
 
     Returns
     -------
@@ -263,11 +367,14 @@ def load_reference(material: str, source: str) -> ReferenceDataset:
 
     Raises
     ------
-    FileNotFoundError if the .h5 file doesn't exist — run registry.py first.
+    FileNotFoundError
+        If the ``.h5`` file does not exist.
+    ValueError
+        If the file uses an older or unrecognised format.
 
     Examples
     --------
-    >>> ref = load_reference("WSe2_bilayer", "Tagarelli2023")
+    >>> ref = load_reference("2L_WSe2", "Tagarelli2023")
     >>> sp  = ref.default_spectrum("electric_field")
     >>> ax.plot(sp.energy, sp.normalised())
 
@@ -285,17 +392,40 @@ def load_reference(material: str, source: str) -> ReferenceDataset:
         )
 
     with h5py.File(path, "r") as hf:
+        fmt = _as_str(hf.attrs.get("format"))
+        if fmt != REF_FORMAT_NAME:
+            raise ValueError(
+                f"'{path.name}' uses format {fmt!r}, not {REF_FORMAT_NAME!r}.\n"
+                f"Run `python -m leman.reference.registry` to regenerate."
+            )
+        version = _as_str(hf.attrs.get("format_version", ""))
+        if version.split(".")[0] != _REF_FORMAT_MAJOR:
+            raise ValueError(
+                f"'{path.name}' is format version {version!r}; "
+                f"this reader requires {_REF_FORMAT_MAJOR}.x.\n"
+                f"Run `python -m leman.reference.registry` to regenerate."
+            )
+
         dataset = ReferenceDataset(
-            material     = hf.attrs.get("material",     material),
-            source       = hf.attrs.get("source",       source),
-            doi          = hf.attrs.get("doi",          ""),
-            dataset_doi  = hf.attrs.get("dataset_doi",  ""),
-            title        = hf.attrs.get("title",        ""),
-            about        = hf.attrs.get("about",      ""),
-            spectroscopy = hf.attrs.get("spectroscopy", "PL"),
+            material     = _as_str(hf.attrs.get("material", material)),
+            source       = _as_str(hf.attrs.get("source", source)),
+            doi          = _as_str(hf.attrs.get("doi", "")),
+            dataset_doi  = _as_str(hf.attrs.get("dataset_doi", "")),
+            title        = _as_str(hf.attrs.get("title", "")),
+            about        = _as_str(hf.attrs.get("about", "")),
+            spectroscopy = _as_str(hf.attrs.get("spectroscopy", "PL")),
         )
 
-        for sweep_name in hf.keys():
-            dataset.sweeps[sweep_name] = _read_sweep(hf[sweep_name], dataset.spectroscopy)
+        if "conditions" in hf:
+            _load_nested(hf, dataset)
+        elif "sweep" in hf:
+            _load_1d_sweep(hf, dataset)
+        elif "axes" in hf and "spectra" in hf:
+            _load_single(hf, dataset)
+        else:
+            raise ValueError(
+                f"'{path.name}' has an unrecognised layout "
+                f"(no 'conditions/', 'sweep/', or 'axes/' + 'spectra/' groups)."
+            )
 
     return dataset

@@ -357,40 +357,36 @@ class Dijkstra2025Processor(Processor):
             fringe_correction = self.fringe_correction,
         )
 
+        default_idx = _find_nearest(result["voltage"], 0.0)
+
         with h5py.File(self.out_path, "w") as hf:
             self._write_metadata(hf)
 
-            # Processing parameters — stored so the file is self-documenting
-            hf.attrs["remove_cosmics"]    = self.remove_cosmics
-            hf.attrs["smooth_kernel"]     = self.smooth_kernel if self.smooth_kernel else 0
-            hf.attrs["fringe_correction"] = self.fringe_correction
+            self._write_provenance(
+                hf,
+                summary=(
+                    "pol-avg → bg-subtract → counts/s"
+                    " → smooth → RC → fringe-correct"
+                ),
+                remove_cosmics=self.remove_cosmics,
+                smooth_kernel=self.smooth_kernel if self.smooth_kernel else 0,
+                fringe_correction=self.fringe_correction,
+            )
 
-            # Outer sweep: gate voltage
-            vg_sweep = hf.create_group("gate_voltage")
-            vg_sweep.attrs["parameter_name"] = "gate_voltage"
-            vg_sweep.attrs["parameter_unit"] = "V"
-            vg_sweep.attrs["default_value"]  = 0.0   # closest to charge neutrality
-
-            # Shared energy axis
-            vg_sweep.create_dataset("energy", data=result["energy"])
-            vg_sweep.attrs["energy_unit"] = "eV"
-
-            voltages      = result["voltage"]
-            RC            = result["RC"]           # (n_vg, n_wl)
-            default_idx   = _find_nearest(voltages, 0.0)
-
-            for i, vg in enumerate(voltages):
-                label   = f"{vg:.4f}"
-                grp     = vg_sweep.create_group(label)
-                grp.create_dataset("spectrum",  data=RC[i])
-                grp.create_dataset("energy",    data=result["energy"])
-                grp.attrs["parameter_value"]  = float(vg)
-                grp.attrs["voltage_index"]    = i
-                grp.attrs["spectrum_unit"]    = "dimensionless"   # ΔR/R₀
-                grp.attrs["is_default"]       = (i == default_idx)
-
-            # Store cosmic flags if they were computed
-            if result["cosmic_flag"] is not None:
-                hf.create_dataset("cosmic_flag", data=result["cosmic_flag"].astype(np.uint8))
+            # RC is (n_vg, n_wl); transpose to (n_wl, n_vg) = (n_pixels, n_sweeps)
+            self._write_1d_sweep(
+                hf,
+                axis_values=result["energy"],
+                axis_name="energy",
+                axis_units="eV",
+                axis_label="Energy",
+                sweep_values=result["voltage"],
+                sweep_name="gate_voltage",
+                sweep_units="V",
+                sweep_label="Gate voltage",
+                default_index=default_idx,
+                intensity_2d=result["RC"].T,
+                intensity_units="dimensionless",
+            )
 
         print(f"  -> Saved to {self.out_path}")
