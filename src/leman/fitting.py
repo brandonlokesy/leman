@@ -1073,6 +1073,18 @@ def fit_raman_modes(
     discovery_fit = fit_multi_voigt(x, y, p0=known_p0, bounds=_bounds(known_modes, known_p0))
     shoulder_x, shoulder_amp = locate_residual_peak(discovery_fit, shoulder_range)
 
+    if shoulder_amp <= 0:
+        fallback = float(np.median(np.abs(discovery_fit.residuals)))
+        warnings.warn(
+            f"locate_residual_peak returned a non-positive height "
+            f"({shoulder_amp:.4g}) in shoulder_range={shoulder_range} "
+            f"— the discovery fit already accounts for everything "
+            f"there. Using the median residual magnitude ({fallback:.4g}) "
+            f"as the shoulder seed.",
+            stacklevel=2,
+        )
+        shoulder_amp = fallback
+
     shoulder_fwhm = peak_config[shoulder_mode]["fwhm_seed"]
     shoulder_p0   = (shoulder_amp, shoulder_x, shoulder_fwhm, shoulder_fwhm)
     shoulder_index = modes.index(shoulder_mode)
