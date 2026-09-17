@@ -323,6 +323,33 @@ def test_fit_raman_modes_unknown_material_or_layer_count_raises():
         fit_raman_modes(RAMAN_X, y, material="WSe2", n_layers=3)
 
 
+def test_fit_raman_modes_survives_a_negative_shoulder_seed():
+    # When the discovery fit over-predicts across the shoulder range,
+    # locate_residual_peak returns a negative height.  Before the fix,
+    # that negative seed violated _bounds' amplitude >= 0 and curve_fit
+    # raised ValueError, which fit_multi_voigt did not catch.
+    #
+    # The optimizer is too flexible to produce this naturally on clean
+    # synthetic data, so we patch locate_residual_peak to return a
+    # negative height — the scenario the defect entry (A26) describes
+    # happening on weak map pixels.
+    from unittest.mock import patch
+
+    y = (
+        voigt_approx(RAMAN_X, 60000.0, 250.6, 1.2, 1.3)
+        + voigt_approx(RAMAN_X, 6000.0, 258.7, 3.5, 3.0)
+        + voigt_approx(RAMAN_X, 2500.0, 309.2, 1.0, 0.5)
+        + 900.0
+    )
+
+    with patch("leman.fitting.locate_residual_peak", return_value=(265.0, -150.0)):
+        with pytest.warns(UserWarning, match="non-positive height") as caught:
+            result = fit_raman_modes(RAMAN_X, y, material="WSe2", n_layers=2)
+
+    assert caught[0].filename == __file__
+    assert isinstance(result, FitResult)
+
+
 # ---------------------------------------------------------------------------
 # classify_raman_layer
 # ---------------------------------------------------------------------------
