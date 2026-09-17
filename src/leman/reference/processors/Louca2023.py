@@ -13,8 +13,9 @@ class Louca2023Processor(Processor):
     """
     def run(self):
         url = "https://archive.materialscloud.org/records/q0deg-ag137/files/Fig1c.xlsx?download=1"
+        print(f"Fetching data from {url} from Materials Cloud.")
 
-        df = pd.read_csv(url)
+        df = pd.read_excel(url)
 
         energy = df['Energy (eV)']
         spectra = df['RC']
@@ -24,3 +25,5 @@ class Louca2023Processor(Processor):
 
             hf.create_dataset('energy', data = energy)
             hf.create_dataset('spectra', data = spectra)
+
+        print(f"  -> Saved to {self.out_path}")
