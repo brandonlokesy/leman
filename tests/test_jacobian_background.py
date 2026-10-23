@@ -12,6 +12,9 @@ for purely instrumental reasons.
 * **The warning** — both classes exposing ``apply_jacobian``
   (ACSpectralSweep, SingleSpectrum) say so at load time when no background
   was supplied.
+* **The inverse** — ``jacobian_correction_E2wvl`` undoes the forward correction
+  and conserves integrated intensity, which is what makes it the right tool for
+  carrying a line shape defined per unit energy onto a wavelength axis.
 
 Synthetic fixtures throughout, reusing the spectral CSV builder from
 ``test_loaders``.
@@ -249,3 +252,47 @@ def test_aux_spectrum_load_does_not_warn(csv_path, bg_path):
         ACSpectralSweep(str(csv_path), spectra_type="PL",
                               bg_spectrum=str(bg_path))
     assert _jacobian_warnings(record) == []
+
+
+# ---------------------------------------------------------------------------
+# The inverse correction, energy → wavelength
+# ---------------------------------------------------------------------------
+
+
+def test_e2wvl_undoes_wvl2e():
+    # (n_pixels, n_sweeps) with the pixel axis first, as the loaders hold it.
+    wl      = np.linspace(700.0, 760.0, 50)
+    spectra = np.random.default_rng(0).random((50, 3))
+    there   = processing.jacobian_correction_wvl2E(spectra, wl, axis=0)
+    back    = processing.jacobian_correction_E2wvl(there, wl, axis=0)
+    assert np.allclose(back, spectra)
+
+
+def test_e2wvl_respects_axis():
+    # The same spectra laid out (n_sweeps, n_pixels) must give the transpose.
+    wl      = np.linspace(700.0, 760.0, 50)
+    spectra = np.random.default_rng(1).random((50, 3))
+    assert np.allclose(
+        processing.jacobian_correction_E2wvl(spectra.T, wl, axis=1),
+        processing.jacobian_correction_E2wvl(spectra, wl, axis=0).T,
+    )
+
+
+def test_e2wvl_conserves_integrated_intensity():
+    # A Lorentzian defined per unit energy, carried to wavelength: the area under
+    # it is the same number of photons on either axis.  Integrated against each
+    # axis's own variable; abs() because wavelength runs the other way.
+    from scipy.integrate import trapezoid
+
+    energy = np.linspace(1.60, 1.80, 20001)
+    gamma  = 2.5e-3
+    i_e    = gamma**2 / ((energy - 1.70)**2 + gamma**2)
+    wl     = HC_EV_NM / energy
+    i_wl   = processing.jacobian_correction_E2wvl(i_e, wl, axis=0)
+
+    area_e  = trapezoid(i_e, energy)
+    area_wl = abs(trapezoid(i_wl, wl))
+    assert area_wl == pytest.approx(area_e, rel=1e-6)
+    # Guards the test: without the Jacobian the areas differ, so the equality
+    # above is a property of the correction rather than of the line shape.
+    assert abs(trapezoid(i_e, wl)) != pytest.approx(area_e, rel=1e-3)
