@@ -13,11 +13,14 @@ different about them, which is the whole reason they are separate:
 |---|---|---|---|
 | `ACSpectralSweep` | wavelength / energy | `[Par, Wavelength, ExpROI1, ExpROI2]`, named by a header | one `.csv` or `.h5` |
 | `BTSpectralSweep` | wavelength / energy | the same four fields with **no header**, and the signal written twice | one `.csv` |
+| `SyntheticSpectralSweep` | wavelength / energy | none — built from arrays | arrays in memory |
 | `ACTRPLSweep` | time (ns) | `[Par, Wavelength, Exp]` — the "Wavelength" column holds **time** | one `.csv`, a **directory**, or `.h5` |
 
-The two spectral classes are siblings under a shared `_SpectralSweep`, so every
+The spectral classes are siblings under a shared `_SpectralSweep`, so every
 correction, both axes and every accessor behave identically; what differs is the
-decoder and which parameter rows the instrument writes. A BigTable export carries
+decoder and which parameter rows the instrument writes. `SyntheticSpectralSweep`
+has no decoder at all: it takes arrays, for testing an analysis against data whose
+answer is known. A BigTable export carries
 no labels at all, so its parameter row names are this package's rather than the
 file's — see ``dev/instruments/big-table.md``.
 

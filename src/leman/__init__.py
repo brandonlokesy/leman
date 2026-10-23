@@ -9,7 +9,7 @@ LANES group at EPFL.
 Submodules
 ----------
 constants   Physical constants, material parameters.
-loaders     Data loaders (DeviceGeometry, ACSpectralSweep, BTSpectralSweep, ...).
+loaders     Data loaders (DeviceGeometry, ACSpectralSweep, BTSpectralSweep, SyntheticSpectralSweep, ...).
 plotting    Publication-ready figure style and common plot types.
 fitting     Spectral fitting (Lorentzian, Gaussian, multi-peak) and sparse TRPL lifetime fitting.
 processing  Smoothing, normalisation, spectral conversions.
@@ -47,6 +47,7 @@ from .loaders import (
     ACTRPLSweep,
     ACPLVabScan,
     BTSpectralSweep,
+    SyntheticSpectralSweep,
     ACImgSweep,
     ACImg,
     ACSampleImg,
@@ -73,6 +74,7 @@ __all__ = [
     "ACTRPLSweep",
     "ACPLVabScan",
     "BTSpectralSweep",
+    "SyntheticSpectralSweep",
     "ACImgSweep",
     "ACImg",
     "ACSampleImg",

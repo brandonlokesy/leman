@@ -353,6 +353,7 @@ Literature values for hBN, WS2, WSe2, MoSe2, MoS2: out-of-plane dielectric const
 | `crop` | Crop spectra and x-axis to a range |
 | `wavelength_to_energy` / `energy_to_wavelength` | Unit conversion |
 | `jacobian_correction_wvl2E` | Apply dλ/dE Jacobian when converting to energy axis |
+| `jacobian_correction_E2wvl` | Apply dE/dλ Jacobian when converting to wavelength axis |
 
 ### `fitting`
 | Function / Class | Purpose |

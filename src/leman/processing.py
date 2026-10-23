@@ -634,6 +634,53 @@ def jacobian_correction_wvl2E(
     shape[axis] = len(jacobian)
     return spectra * jacobian.reshape(shape)
 
+def jacobian_correction_E2wvl(
+    spectra       : np.ndarray,
+    wavelength_nm : np.ndarray,
+    axis          : int = 0,
+) -> np.ndarray:
+    r"""
+    Apply the Jacobian correction when converting a spectrum from energy to wavelength.
+
+    The inverse of :func:`jacobian_correction_wvl2E`. A spectral density per unit
+    energy is multiplied by :math:`\mathrm{d}E/\mathrm{d}\lambda = hc/\lambda^2`, so
+    that the integrated intensity is the same on both axes:
+
+    .. math:: I_\lambda(\lambda) = I_E(E) \frac{\mathrm{d}E}{\mathrm{d}\lambda} = I_E(E) \frac{hc}{\lambda^2}
+
+    Use it to turn a spectrum defined per unit energy — a model line shape, or
+    synthetic data — into what a spectrometer with pixels evenly spaced in
+    wavelength would record. Applying :func:`jacobian_correction_wvl2E` to the
+    result returns the input.
+
+    The sign of :math:`\mathrm{d}E/\mathrm{d}\lambda` is dropped, as in the forward
+    correction: the axis reversal between energy and wavelength order carries it.
+    The array is not reordered here; *spectra* and *wavelength_nm* must already be
+    in the same pixel order.
+
+    A non-zero background *B* is scaled to :math:`B\,hc/\lambda^2` like any other
+    value, so a flat pedestal becomes a sloped one.
+
+    Parameters
+    ----------
+    spectra : np.ndarray
+        Spectral density per unit energy.
+    wavelength_nm : np.ndarray, shape (n_pixels,)
+        Wavelength of each pixel of *spectra* along *axis*, in nm.
+    axis : int
+        Pixel axis of *spectra*.
+
+    Returns
+    -------
+    np.ndarray
+        Spectral density per unit wavelength, same shape and pixel order as
+        *spectra*.
+    """
+    jacobian = HC_EV_NM / wavelength_nm**2
+    shape = [1] * spectra.ndim
+    shape[axis] = len(jacobian)
+    return spectra * jacobian.reshape(shape)
+
 def _draw_region_box(ax, region, color, label=None, lw=1.2, ls="-"):
     if region is None:
         return None

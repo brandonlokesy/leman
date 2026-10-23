@@ -5799,6 +5799,325 @@ class BTSpectralSweep(_SpectralSweep):
 
 
 # ---------------------------------------------------------------------------
+# SyntheticSpectralSweep
+# ---------------------------------------------------------------------------
+
+# A synthetic sweep has no exporter, so its rows are whatever the caller named
+# them. The one convention kept is the power row, spelled as both instruments
+# spell it, so sweep="power" works without a curated override. The gate rows are
+# None because gates= names them; the scanner rows are None because no synthetic
+# position has a unit to claim. Every scale is 1: there is nothing to calibrate.
+_SYNTHETIC_CURATED = {
+    "v_top":     (None,               1.0, "V"),
+    "v_bot":     (None,               1.0, "V"),
+    "power":     ("Excitation Power", 1.0, "µW"),
+    "i_top":     (None,               1.0, ""),
+    "i_bot":     (None,               1.0, ""),
+    "i_channel": (None,               1.0, ""),
+    "scanner_x": (None,               1.0, ""),
+    "scanner_y": (None,               1.0, ""),
+}
+
+# Stands in for a file path in every message that quotes one.
+_SYNTHETIC_PATH = "<synthetic>"
+
+
+class SyntheticSpectralSweep(_SpectralSweep):
+    """
+    A sweep of spectra built from arrays in memory rather than read from a file.
+
+    For testing analysis against data whose answer is known: a line shape with a
+    chosen centre, width and power dependence goes in, and every plotting and
+    fitting function that takes a spectral sweep accepts the result. The
+    correction ladder, both spectral axes, the sweep axis, the gate vocabulary
+    and nested sweeps all behave exactly as they do for :class:`ACSpectralSweep`,
+    which documents them in full.
+
+    With every correction argument left at its default, :attr:`best_spectra` and
+    :attr:`best_energy_spectra` are the input values. To test a correction, add
+    the artefact to the arrays — a pedestal, a spike — and request the
+    correction here, so it runs through the same code as for measured data.
+
+    **The axis.** Give exactly one of *wavelength* (nm) or *energy* (eV), either
+    strictly increasing or strictly decreasing. The arrays are stored on an
+    ascending wavelength axis, as for every loader, so energy input is converted
+    with :math:`\\lambda = hc/E` and the spectra rows are reordered to match.
+    The values themselves are **not** converted: they are taken as counts per
+    pixel on the grid given. So with ``apply_jacobian=False``, :attr:`energy` and
+    :attr:`energy_spectra` equal an energy input, and :attr:`spectra` holds the
+    same values in wavelength order — not a density per unit wavelength. To
+    model what a spectrometer would record from a line shape defined per unit
+    energy, convert it with
+    :func:`~leman.processing.jacobian_correction_E2wvl` and pass *wavelength*.
+
+    **The parameter rows** are named by the caller. ``sweep="power"`` reads the
+    row ``"Excitation Power"``, taken to be in µW; any row label is also a valid
+    *sweep*, *fast_sweep* or *slow_sweep*, given a *sweep_unit*. The gate rows
+    are named through *gates*.
+
+    Parameters
+    ----------
+    spectra : array_like, shape (n_pixels, n_sweeps)
+        One spectrum per column, pixel axis first. A single spectrum is
+        ``(n_pixels, 1)``.
+    wavelength : array_like, shape (n_pixels,), optional
+        nm. Give this or *energy*, not both.
+    energy : array_like, shape (n_pixels,), optional
+        eV, all positive. Give this or *wavelength*, not both.
+    parameters : dict, optional
+        Row label → one value per sweep point, shape ``(n_sweeps,)``. A nest
+        is given as two rows flattened in acquisition order, the fast quantity
+        changing at every point.
+    spectra_type : str
+        What the data stands for, e.g. ``"PL"``. Required and keyword-only. One
+        of :data:`~leman.constants.SPECTROSCOPY_TYPES`.
+    sweep : str, optional
+        What was scanned: a registry key (``"power"``, ``"top_voltage"``, …)
+        or a row label of *parameters*. Undeclared means the sweep **index**.
+    sweep_label, sweep_unit : str, optional
+        Override the resolved axis label and unit. A row-label sweep has no unit
+        of its own, so it wants both.
+    fast_sweep, slow_sweep : str, optional
+        Declare a 2-D nest. Same vocabulary as *sweep*; both are required
+        together.
+    n_fast, n_slow : int, optional
+        Assert the nest shape instead of resolving it from the rows.
+    fast_group_by, slow_group_by : str, optional
+        Establish an axis's levels from a different row than the one plotted.
+    geometry : DeviceGeometry, optional
+        Needed for :attr:`ef` and :attr:`carrier_density`.
+    gates : dict, optional
+        Which row reached which electrode, as ``{"top": ..., "bottom": ...,
+        "channel": ...}``. Every gate quantity refuses until it is declared.
+    cosmic_rays : dict, optional
+        Forwarded to :func:`~leman.processing.remove_cosmic_rays`.
+        ``{}`` accepts every default; ``None`` leaves the repair off.
+    bg_region_nm, bg_region_eV : tuple, optional
+        Window whose mean is subtracted as a pedestal. At most one.
+    bg_spectrum : optional
+        A background on this sweep's own wavelength grid.
+    reference : optional
+        A reference spectrum; supplying it is what opts into :attr:`contrast`.
+    reference_scale : float, optional
+        Multiplies *reference* before the contrast is formed.
+    contrast : {"contrast", "ratio"}
+        ``(S-R)/R`` or ``S/R``.
+    apply_jacobian : bool
+        Apply the ``λ²/hc`` density correction to the energy-axis arrays. With
+        energy input this changes them away from the input values.
+
+    Attributes
+    ----------
+    wavelength : np.ndarray, shape (n_pixels,)
+        nm, ascending.
+    spectra : np.ndarray, shape (n_pixels, n_sweeps)
+        The input values on the ascending wavelength axis; a copy, so changing
+        the caller's array afterwards changes nothing here.
+    energy : np.ndarray, shape (n_pixels,)
+        eV, ascending.
+    parameters : dict
+        The rows given, as float arrays.
+    path : str
+        ``"<synthetic>"``, which is what every message quoting a file shows.
+
+    Raises
+    ------
+    ValueError
+        If neither or both of *wavelength* and *energy* are given, the axis is
+        not strictly monotonic or not finite, an energy is not positive,
+        *spectra* does not have one row per pixel, or a parameter row does not
+        have one value per sweep point.
+    NotImplementedError
+        On :meth:`to_hdf5`. The archive format cannot mark a sweep as
+        synthetic, so it would read back as measured data.
+
+    See Also
+    --------
+    ACSpectralSweep : the same machinery reading a measured export; its
+        docstring documents the shared parameters and the correction ladder.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from leman.fitting import lorentzian
+    >>> energy = np.linspace(1.65, 1.75, 500)
+    >>> power  = np.array([1.0, 2.0, 4.0])
+    >>> spectra = np.stack(
+    ...     [lorentzian(energy, p, 1.70, 5e-3) for p in power], axis=1)
+    >>> scan = SyntheticSpectralSweep(
+    ...     spectra, energy=energy,
+    ...     parameters={"Excitation Power": power},
+    ...     spectra_type="PL", sweep="power",
+    ... )
+    >>> scan.n_pixels, scan.n_sweeps
+    (500, 3)
+    """
+
+    _LAYOUT_KIND = "synthetic_spectral"
+
+    _CURATED         = _SYNTHETIC_CURATED
+    _SIBLING_CURRENT = {}
+
+    # _HDF5_SIGNALS stays at the inherited empty default: to_hdf5 refuses before
+    # anything reads it.
+
+    def __init__(
+        self,
+        spectra,
+        *,
+        wavelength              = None,
+        energy                  = None,
+        parameters      : dict  = None,
+        spectra_type    : str   = None,
+        sweep           : str   = None,
+        sweep_label     : str   = None,
+        sweep_unit      : str   = None,
+        fast_sweep      : str   = None,
+        slow_sweep      : str   = None,
+        n_fast          : int   = None,
+        n_slow          : int   = None,
+        fast_group_by   : str   = None,
+        slow_group_by   : str   = None,
+        geometry        : DeviceGeometry = None,
+        gates           : dict  = None,
+        cosmic_rays     : dict  = None,
+        bg_region_nm    : tuple = None,
+        bg_region_eV    : tuple = None,
+        bg_spectrum             = None,
+        reference               = None,
+        reference_scale : float = None,
+        contrast        : str   = "contrast",
+        apply_jacobian  : bool  = False,
+    ):
+        self._check_spectral_arguments(bg_region_nm, bg_region_eV, cosmic_rays)
+
+        # Checked and copied before anything else, so the shared steps below
+        # see arrays in the shape every decoder returns.  _decode hands this
+        # back in place of reading a file.
+        self._payload = self._payload_from_arrays(
+            spectra, wavelength, energy, parameters)
+
+        self._decode_and_describe(
+            _SYNTHETIC_PATH, spectra_type=spectra_type, geometry=geometry,
+            gates=gates,
+        )
+        self.wavelength = self._payload["wavelength"]   # nm, ascending
+        self.spectra    = self._payload["spectra"]      # (n_pixels, n_sweeps)
+        del self._payload
+        self._validate_payload()
+
+        self._bind_aux_spectra(bg_spectrum, reference, reference_scale,
+                               contrast, apply_jacobian)
+
+        self._bind_sweep_axis(sweep, sweep_label, sweep_unit)
+        self._bind_nesting(fast_sweep, slow_sweep, n_fast=n_fast, n_slow=n_slow,
+                           fast_group_by=fast_group_by,
+                           slow_group_by=slow_group_by)
+
+        # stacklevel=4, as for the file loaders: this method is one frame
+        # further from the caller than __init__ is.
+        self._build_correction_ladder(
+            cosmic_rays, bg_region_nm, bg_region_eV, stacklevel=4,
+        )
+
+    # --- Building the payload ----------------------------------------------
+
+    @staticmethod
+    def _payload_from_arrays(spectra, wavelength, energy, parameters) -> dict:
+        """
+        Check the caller's arrays and return them as the decoder payload.
+
+        Every array is copied as float, which is what makes :attr:`spectra`
+        independent of the caller's array.
+        """
+        if (wavelength is None) == (energy is None):
+            raise ValueError(
+                "Give exactly one of wavelength= (nm) or energy= (eV) — "
+                + ("neither was given." if wavelength is None
+                   else "both were given, and they could disagree.")
+            )
+        name = "wavelength" if energy is None else "energy"
+        axis = np.array(wavelength if energy is None else energy, dtype=float)
+
+        if axis.ndim != 1 or axis.size < 2:
+            raise ValueError(
+                f"{name} must be a 1-D array of at least two points; got shape "
+                f"{axis.shape}."
+            )
+        if not np.all(np.isfinite(axis)):
+            raise ValueError(f"{name} contains a non-finite value.")
+        steps = np.diff(axis)
+        if not (np.all(steps > 0) or np.all(steps < 0)):
+            raise ValueError(
+                f"{name} must be strictly increasing or strictly decreasing: a "
+                f"spectral axis gives each pixel its own value."
+            )
+        if energy is not None:
+            if axis.min() <= 0:
+                raise ValueError(
+                    f"energy must be positive to convert to wavelength; the "
+                    f"smallest value is {axis.min()!r} eV."
+                )
+            axis = HC_EV_NM / axis
+
+        values = np.array(spectra, dtype=float)
+        if values.ndim != 2 or values.shape[0] != axis.size:
+            # The commonest way to get here is one spectrum per row, which is
+            # how a loop that fills spectra[i, :] lays them out.
+            hint = (f" It looks transposed: pass spectra.T."
+                    if values.ndim == 2 and values.shape[1] == axis.size else "")
+            raise ValueError(
+                f"spectra must have shape (n_pixels, n_sweeps) = "
+                f"({axis.size}, n_sweeps), one spectrum per column; got "
+                f"{values.shape}.{hint}"
+            )
+
+        # One permutation for the axis and the spectra rows together, so each
+        # pixel keeps its own value; an increasing energy grid comes out
+        # reversed.
+        order  = np.argsort(axis)
+        axis   = axis[order]
+        values = values[order, :]
+
+        rows = {}
+        for label, row in (parameters or {}).items():
+            row = np.array(row, dtype=float)
+            if row.shape != (values.shape[1],):
+                raise ValueError(
+                    f"parameter row {label!r} has shape {row.shape}; expected "
+                    f"one value per sweep point, ({values.shape[1]},)."
+                )
+            rows[str(label)] = row
+
+        return {
+            "wavelength" : axis,
+            "spectra"    : values,
+            "parameters" : rows,
+            "metadata"   : {},
+            "n_declared" : None,
+        }
+
+    def _decode(self, path) -> dict:
+        """Return the arrays given to the constructor; there is no file."""
+        return self._payload
+
+    def _validate_payload(self) -> None:
+        """The shared consistency checks; the rest ran on the caller's arrays."""
+        self._validate_axis_and_signals(self.wavelength, {"spectra": self.spectra})
+
+    # --- What this class does not do ---------------------------------------
+
+    def to_hdf5(self, path, **kwargs):
+        """Not available for a synthetic sweep — see the message it raises."""
+        raise NotImplementedError(
+            "A SyntheticSpectralSweep cannot be written as HDF5. The archive "
+            "format has no field marking a sweep as synthetic, so the file "
+            "would read back as a measured ACSpectralSweep. Keep the script "
+            "that builds the arrays instead; it is the record."
+        )
+
+
+# ---------------------------------------------------------------------------
 # ACTRPLSweep
 # ---------------------------------------------------------------------------
 

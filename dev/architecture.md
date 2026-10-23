@@ -1053,6 +1053,7 @@ has aligned the axes themselves has a route in, with no extra API.
 | `ACTRPLSweep` | a **directory** of temporal CSVs, or an `.h5` | separate class, no `spectra` attribute |
 | `ACPLVabScan` | — | compatibility shim over the above; raises `FutureWarning` |
 | `BTSpectralSweep` | one **headerless** spectral CSV | a sibling, not a subclass; see below |
+| `SyntheticSpectralSweep` | arrays in memory | a third sibling, for testing analysis against a known answer; see below |
 | `SingleSpectrum` | a 2-row CSV (row 0 = λ/nm, row 1 = counts) | mirrors the sweep's attribute names so plotting works unchanged |
 | `ACImgSweep` | a directory of numeric-grid CSVs | image sequence for diffusion work |
 | `SingleImage`, `ACSampleImg`, `ACImg` | one numeric-grid CSV | share `_ACImg`; only `ACImg` takes `bg_region=` — see below |
@@ -1085,6 +1086,32 @@ Three things about the export shape the class, and all three are recorded in
 `to_hdf5` refuses, in both directions. `hdf5._AXIS_KIND_FOR_LAYOUT` records which
 axis a file holds but nothing records which instrument wrote it, so a saved sweep
 would read back as an `ACSpectralSweep`.
+
+## `SyntheticSpectralSweep` — a sweep with no file
+
+Built from a `(n_pixels, n_sweeps)` array and one of `wavelength=` / `energy=`, so
+that synthetic data reaches every function that takes a spectral sweep. It is a
+real `_SpectralSweep` rather than a duck-typed stand-in, because plotting reads
+the correction rungs by attribute name and reaches the nest and accessor
+machinery; a look-alike breaks at the first attribute it does not fake.
+
+- **It owes the same list as `BTSpectralSweep`.** The decoder is an override of
+  `_decode` that returns the arrays the constructor checked, in the payload shape
+  every file decoder returns, so `_decode_and_describe` and every step after it run
+  unchanged. `self.path` is `"<synthetic>"`, which is what messages quoting a file
+  show.
+- **The full correction ladder is built.** With every correction off, `best_*`
+  is the input, so no special "best" slot is needed; and the rungs exist as `None`
+  rather than being absent, which is the distinction `_resolve_spectra` reads.
+- **Energy input is reordered, not converted.** The values are counts per pixel on
+  the grid given, so with `apply_jacobian=False` the energy arrays equal the input.
+  A caller wanting a per-wavelength density converts with
+  `processing.jacobian_correction_E2wvl` and passes `wavelength=`.
+- **`_SYNTHETIC_CURATED`** keeps only the power row's conventional label
+  (`"Excitation Power"`, µW) so `sweep="power"` works; the gate rows come from
+  `gates=`, and the scanner rows are `None`.
+- **`to_hdf5` refuses**, for the reason `BTSpectralSweep`'s does plus one: the
+  archive would read back as measured data.
 
 ## `ACTRPLSweep` — why a directory
 
@@ -1344,6 +1371,7 @@ drawer instead of forking it (D1).
 normalise_peak / normalise_area      subtract_background / subtract_spectrum
 smooth_median / smooth_savgol        crop / _window_slice
 wavelength_to_energy / energy_to_wavelength / jacobian_correction_wvl2E
+jacobian_correction_E2wvl
 spectral_contrast                    remove_cosmic_rays
 ```
 
