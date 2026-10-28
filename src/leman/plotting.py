@@ -1768,7 +1768,7 @@ def plot_micrograph(
     ValueError
         If *scalebar* is set and the micrograph's pixel size is unknown — an image
         exported without its info bar, loaded without ``magnification=`` or
-        ``pixel_size=``.
+        ``pixel_size=``; or if scale-bar keywords are given with ``scalebar=False``.
 
     Examples
     --------
@@ -1778,6 +1778,11 @@ def plot_micrograph(
     ...     font_properties={"size": 24},
     ... )
     """
+    if not scalebar and scalebar_kwargs:
+        raise ValueError(
+            f"Scale-bar keywords {sorted(scalebar_kwargs)} were given with "
+            "scalebar=False, so they would have no effect."
+        )
     if scalebar and micrograph.pixel_size is None:
         raise ValueError(
             f"No scale bar can be drawn for '{micrograph.path}': its pixel size is "
@@ -1795,8 +1800,8 @@ def plot_micrograph(
 
     sb = None
     if scalebar:
-        # Imported here rather than at module level, so `import leman` still works
-        # in an environment installed before matplotlib-scalebar was a dependency.
+        # Imported on use, so the rest of the package works in an environment
+        # that lacks matplotlib-scalebar; only drawing a scale bar needs it.
         from matplotlib_scalebar.scalebar import ScaleBar
         sb = ScaleBar(micrograph.pixel_size, units="um", **scalebar_kwargs)
         ax.add_artist(sb)

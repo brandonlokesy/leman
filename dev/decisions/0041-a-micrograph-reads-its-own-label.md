@@ -36,6 +36,9 @@ facts shape the choice:
    refuses unless that is what the label does show.
 5. **`pixel_size=` is a measured calibration.** It replaces the nominal value, is
    not compared with the label, and cannot be combined with `magnification=`.
+   With it, `magnification` is `None` and the label's value stays in
+   `label_magnification`; `repr` shows the equivalent magnification at the
+   nominal calibration (2500 µm / 363 px ÷ pixel size) as a reading aid only.
 6. **The masks ship inside the package** (`src/leman/data/micrograph_masks.npz`,
    3.4 kB, via `package-data`), built by `dev/build_micrograph_masks.py` from the
    `*_example_1` files only.
@@ -61,6 +64,16 @@ facts shape the choice:
   nothing. `pixel_size=` stays, for measured values only.
 - **Letting `pixel_size=` win over `magnification=` when both are given.** The two
   can contradict each other; which one was meant cannot be known.
+- **Keeping the label's value as `magnification` when `pixel_size=` is given.** A
+  measured pixel size is often the remedy for a wrong label, and since
+  `magnification=` cannot accompany `pixel_size=`, nothing could correct the
+  stored value: the object would carry a right pixel size and a wrong
+  magnification.
+- **Allowing `magnification=` + `label_reads=` + `pixel_size=` together** to record
+  the objective alongside a measured pixel size. It reopens the two-sources
+  ambiguity refused above, for a value nothing downstream uses.
+- **An `equivalent_magnification` attribute.** It rests on the nominal table, which
+  has no calibration record; as an attribute it would be computed with.
 - **Installing `examples/data` with the package to build the masks at run time.**
   625 MB downloaded for an 8 kB need, and an edited example would change how the
   loader behaves.

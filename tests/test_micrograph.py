@@ -74,6 +74,14 @@ def test_an_image_from_another_instrument_is_refused():
         Micrograph(str(ROOT / "example_reject.png"))
 
 
+def test_a_wrong_size_is_refused_before_the_pixels_are_decoded(monkeypatch):
+    def no_decoding(*args, **kwargs):
+        raise AssertionError("pixels were decoded")
+    monkeypatch.setattr(Image.Image, "convert", no_decoding)
+    with pytest.raises(ValueError, match="2848 × 2848 px"):
+        Micrograph(str(ROOT / "example_reject.png"))
+
+
 def test_nominal_pixel_size_is_the_scale_bar_over_363_px():
     assert Micrograph(FIFTY).pixel_size == pytest.approx(50 / 363)
 
@@ -168,8 +176,35 @@ def test_magnification_on_an_image_without_a_bar():
 def test_pixel_size_replaces_the_nominal_value_and_keeps_the_label():
     img = Micrograph(FIFTY, pixel_size=0.14)
     assert img.pixel_size == 0.14
-    assert img.magnification == 50
+    assert img.label_magnification == 50
+    # The label may be the wrong one, so no magnification is left in use.
+    assert img.magnification is None
     assert "given" in repr(img)
+
+
+def test_a_given_pixel_size_prints_its_equivalent_magnification():
+    # 80 µm over 587 px: 2500 µm / 363 px divided by 80/587 µm/px ≈ 50.5×.
+    text = repr(Micrograph(FIFTY, pixel_size=80 / 587))
+    assert "≈ 50.5× at the nominal calibration" in text
+    assert "label reads 50×" in text
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"magnification": 50.0},
+    {"magnification": True},
+    {"magnification": "50"},
+    {"magnification": 100, "label_reads": 50.0},
+    {"pixel_size": "0.14"},
+    {"pixel_size": True},
+])
+def test_an_argument_of_the_wrong_type_is_refused_with_a_clear_message(kwargs):
+    with pytest.raises(ValueError, match="must be a"):
+        Micrograph(FIFTY, **kwargs)
+
+
+def test_numpy_numbers_are_accepted():
+    assert Micrograph(FIFTY, magnification=np.int64(50)).magnification == 50
+    assert Micrograph(BW, pixel_size=np.float32(0.14)).pixel_size == pytest.approx(0.14)
 
 
 def test_pixel_size_with_magnification_is_refused():
@@ -256,6 +291,11 @@ def test_no_scale_bar_gives_a_none_member():
     assert plot_micrograph(Micrograph(FIFTY), scalebar=False).scalebar is None
 
 
+def test_scale_bar_keywords_without_a_scale_bar_are_refused():
+    with pytest.raises(ValueError, match="no effect"):
+        plot_micrograph(Micrograph(FIFTY), scalebar=False, location="lower right")
+
+
 def test_an_unknown_pixel_size_refuses_a_scale_bar_but_still_plots_without():
     img = Micrograph(BW)
     with pytest.raises(ValueError, match="magnification= or pixel_size="):
@@ -272,6 +312,23 @@ def test_drawing_into_given_axes():
 # ---------------------------------------------------------------------------
 # The shipped masks
 # ---------------------------------------------------------------------------
+
+
+def test_the_derived_lengths_are_the_measured_ones():
+    """46 rows and 363 px are measured facts; the constants are derived from positions."""
+    from leman.loaders import _MICROGRAPH_BAR_ROWS, _MICROGRAPH_SCALE_PX
+    assert _MICROGRAPH_BAR_ROWS == 46
+    assert _MICROGRAPH_SCALE_PX == 363
+
+
+def test_the_cached_masks_cannot_be_changed():
+    x_mask, label_masks = _micrograph_masks()
+    with pytest.raises(ValueError):
+        x_mask[0, 0] = True
+    with pytest.raises(ValueError):
+        label_masks[50][0, 0] = True
+    with pytest.raises(TypeError):
+        label_masks[40] = label_masks[50]
 
 
 def test_shipped_masks_match_a_rebuild_from_the_committed_examples():

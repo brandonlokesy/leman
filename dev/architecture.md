@@ -1074,7 +1074,7 @@ What the object then carries:
 | Attribute | Value |
 |---|---|
 | `label_magnification` | what the label reads, or `None` (no bar, or unreadable) |
-| `magnification` | `magnification=` if given, else the label |
+| `magnification` | `magnification=` if given, else the label; `None` when `pixel_size=` is given, since the label may be the wrong one |
 | `pixel_size` | `pixel_size=` if given, else nominal µm/px for `magnification`, else `None` |
 | `img_raw` / `img` | the frame as saved / the same array, or its first 2002 rows with `remove_info_bar=True` |
 
