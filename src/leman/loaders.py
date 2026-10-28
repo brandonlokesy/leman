@@ -36,6 +36,8 @@ ACLaserRefImg
 
 from __future__ import annotations
 
+import functools as _functools
+import importlib.resources as _resources
 import inspect
 import io
 import re
@@ -46,6 +48,7 @@ from typing import NamedTuple
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from PIL import Image as _PILImage
 from skimage.exposure import rescale_intensity
 from skimage.morphology import white_tophat, disk
 from skimage.measure import label, regionprops
@@ -7755,6 +7758,255 @@ def _micrograph_text_mask(box: np.ndarray) -> np.ndarray:
     # (rows, cols, 3) -> (rows, cols): the darkest channel decides, so a saturated
     # colour seen through the overlay (bright in one channel only) is not text.
     return box.min(axis=-1) >= _MICROGRAPH_TEXT_MIN
+
+
+@_functools.lru_cache(maxsize=None)
+def _micrograph_masks() -> tuple:
+    """The shipped text masks: the ``X:`` mask, and ``{magnification: label mask}``."""
+    ref = _resources.files("leman") / "data" / "micrograph_masks.npz"
+    with ref.open("rb") as fh, np.load(fh) as npz:
+        labels = {int(key): npz[key] for key in npz.files if key != "x"}
+        return npz["x"], labels
+
+
+def _jaccard(mask: np.ndarray, template: np.ndarray) -> float:
+    """Pixels set in both masks over pixels set in either; 0 when both are empty."""
+    union = np.count_nonzero(mask | template)
+    return np.count_nonzero(mask & template) / union if union else 0.0
+
+
+def _read_micrograph_bar(frame: np.ndarray) -> tuple:
+    """
+    Return ``(has_info_bar, label_magnification)`` for a full frame.
+
+    The bar is recognised by the ``X:`` annotation, which a sample name can never
+    overlap with. The label is the stored mask that matches best, provided it clears
+    ``_MICROGRAPH_LABEL_MIN``; otherwise ``None`` — unreadable, never guessed.
+    """
+    x_mask, label_masks = _micrograph_masks()
+    has_bar = _jaccard(_micrograph_text_mask(frame[_MICROGRAPH_X_BOX]), x_mask) >= _MICROGRAPH_X_MIN
+    text = _micrograph_text_mask(frame[_MICROGRAPH_LABEL_BOX])
+    scores = {m: _jaccard(text, template) for m, template in label_masks.items()}
+    best = max(scores, key=scores.get)
+    return has_bar, (best if scores[best] >= _MICROGRAPH_LABEL_MIN else None)
+
+
+def _scale_bar_footprint_is_white(frame: np.ndarray) -> bool:
+    """Whether every column of the scale bar's footprint is bar-white."""
+    # (8, 363, 3) -> (8, 363) darkest channel -> (363,) median over the core rows.
+    # Only "white where the bar should be" is tested: overlapping sample-name text
+    # can add white around the bar but cannot remove the bar's own.
+    core = frame[_MICROGRAPH_SCALE_ROWS, _MICROGRAPH_SCALE_COLS].min(axis=-1)
+    return bool((np.median(core, axis=0) >= _MICROGRAPH_TEXT_MIN).all())
+
+
+class Micrograph:
+    """
+    Bright-field image from the main-lab Olympus microscope, loaded from its JPEG export.
+
+    The microscope software saves a 2448 × 2048 px RGB image and, by default, lays a
+    translucent 46 px info bar across the bottom: stage coordinates, the sample
+    name, a 363 px scale bar, and the scale bar's length as text. That text is the
+    only record of the magnification, so it is read from the image: the label is
+    compared against stored images of the five labels the software draws, and one
+    that matches none of them is treated as unreadable, never guessed. Images
+    exported without the bar load normally, with no magnification and no pixel size
+    unless one is given.
+
+    The pixel size is **nominal**: the scale bar length the software assigns to each
+    objective, over 363 px. It has not been checked against a stage micrometer, and
+    an objective's true magnification typically differs from its nominal value by a
+    few percent; every length measured from the image carries that uncertainty.
+    Pass ``pixel_size=`` to use a measured value instead.
+
+    ====== ============= =====================
+    Label  Magnification Pixel size (µm / px)
+    ====== ============= =====================
+    500 um 5             1.377
+    250 um 10            0.6887
+    125 um 20            0.3444
+    50 um  50            0.1377
+    25 um  100           0.06887
+    ====== ============= =====================
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to the ``.jpg`` export.
+    magnification : int, optional
+        Objective magnification: 5, 10, 20, 50 or 100. Needed when the image has
+        no info bar, or its label cannot be read, and *pixel_size* is not given.
+        When the label is readable it must agree, unless *label_reads* says what
+        the wrong label shows.
+    label_reads : int, optional
+        The magnification the image's label shows, when it is wrong — the software
+        was set to a different objective than the one in use. Requires
+        *magnification* (the true value), must match what the label actually
+        reads, and must differ from *magnification*.
+    pixel_size : float, optional
+        Measured pixel size in µm per pixel, e.g. from a structure of known size.
+        Replaces the nominal value and is not compared with the label. Cannot be
+        given together with *magnification*.
+    remove_info_bar : bool
+        Drop the bottom 46 rows from :attr:`img`. Default ``False``. Because the bar
+        is translucent, those rows also hold sample, tinted and under text.
+
+    Attributes
+    ----------
+    path : str
+    img_raw : np.ndarray, shape (2048, 2448, 3), uint8
+        The image as saved, info bar included. Never modified after loading.
+    img : np.ndarray, shape (n_rows, 2448, 3), uint8
+        :attr:`img_raw`, or its first 2002 rows when *remove_info_bar* is set.
+    has_info_bar : bool
+    label_magnification : int or None
+        What the label reads; ``None`` with no info bar or an unreadable label.
+    magnification : int or None
+        *magnification* if given, otherwise :attr:`label_magnification`.
+    pixel_size : float or None
+        µm per pixel: *pixel_size* if given, otherwise the nominal value for
+        :attr:`magnification`; ``None`` when neither is known.
+
+    Raises
+    ------
+    ValueError
+        If the image is not 2448 × 2048 px (another instrument); if the bar is
+        recognised but the scale bar or label is not where this exporter draws
+        them; if *magnification* disagrees with the label without *label_reads*;
+        if the label cannot be read and neither *magnification* nor *pixel_size*
+        is given; if *remove_info_bar* is set on an image with no bar; or if the
+        arguments contradict each other.
+    """
+
+    def __init__(
+        self,
+        path               : str,
+        magnification      : int   = None,
+        label_reads        : int   = None,
+        pixel_size         : float = None,
+        remove_info_bar    : bool  = False,
+    ):
+        self.path = str(path)
+        known = ", ".join(str(m) for m in _MICROGRAPH_SCALE_UM)
+
+        # ---- Arguments that contradict each other, before reading anything ----
+        if pixel_size is not None and magnification is not None:
+            raise ValueError(
+                "Give magnification= or pixel_size=, not both: a measured pixel "
+                "size and a nominal magnification can disagree."
+            )
+        if pixel_size is not None and not (np.isfinite(pixel_size) and pixel_size > 0):
+            raise ValueError(f"pixel_size= must be a positive number of µm per pixel, got {pixel_size!r}.")
+        if magnification is not None and magnification not in _MICROGRAPH_SCALE_UM:
+            raise ValueError(
+                f"magnification={magnification!r} is not one the software is "
+                f"calibrated for ({known}). Pass pixel_size= in µm per pixel instead."
+            )
+        if label_reads is not None:
+            if magnification is None:
+                raise ValueError(
+                    "label_reads= corrects a wrong label, so it needs magnification= "
+                    "as well: the magnification actually used."
+                )
+            if label_reads not in _MICROGRAPH_SCALE_UM:
+                raise ValueError(f"label_reads={label_reads!r} is not a label the software draws ({known}).")
+            if label_reads == magnification:
+                raise ValueError(
+                    f"label_reads={label_reads} equals magnification={magnification}: "
+                    "nothing to correct. Drop label_reads=."
+                )
+
+        with _PILImage.open(self.path) as im:
+            self.img_raw = np.asarray(im.convert("RGB"))
+
+        if self.img_raw.shape[:2] != _MICROGRAPH_SHAPE:
+            rows, cols = self.img_raw.shape[:2]
+            raise ValueError(
+                f"'{self.path}' is {cols} × {rows} px; the main-lab microscope saves "
+                f"{_MICROGRAPH_SHAPE[1]} × {_MICROGRAPH_SHAPE[0]} px. The image is "
+                "from another instrument, or was resized or cropped after export."
+            )
+
+        # ---- What the info bar says ----
+        self.has_info_bar, self.label_magnification = _read_micrograph_bar(self.img_raw)
+        if not self.has_info_bar and self.label_magnification is not None:
+            raise ValueError(
+                f"'{self.path}' carries a scale-bar label but not the 'X:' that opens "
+                "the info bar: the bar layout is not the one this loader knows."
+            )
+        if self.has_info_bar and not _scale_bar_footprint_is_white(self.img_raw):
+            raise ValueError(
+                f"'{self.path}' has an info bar, but its scale bar is not at columns "
+                f"{_MICROGRAPH_SCALE_COLS.start}–{_MICROGRAPH_SCALE_COLS.stop - 1}: "
+                "the bar layout is not the one this loader knows."
+            )
+
+        # ---- Arguments checked against the label ----
+        label_mag = self.label_magnification
+        if label_reads is not None and label_mag is None:
+            raise ValueError(
+                f"label_reads={label_reads} was given, but '{self.path}' has "
+                + ("no info bar" if not self.has_info_bar else "a label that cannot be read")
+                + ", so there is nothing to check it against. Pass magnification= alone."
+            )
+        if label_reads is not None and label_reads != label_mag:
+            raise ValueError(
+                f"label_reads={label_reads}, but the label in '{self.path}' reads "
+                f"{label_mag}× ({_MICROGRAPH_SCALE_UM[label_mag]} um)."
+            )
+        if magnification is not None and label_mag is not None and label_reads is None \
+                and magnification != label_mag:
+            raise ValueError(
+                f"magnification={magnification}, but the label in '{self.path}' reads "
+                f"{label_mag}× ({_MICROGRAPH_SCALE_UM[label_mag]} um). If the software was "
+                f"set to the wrong objective, pass "
+                f"magnification={magnification}, label_reads={label_mag}."
+            )
+        if self.has_info_bar and label_mag is None and magnification is None and pixel_size is None:
+            raise ValueError(
+                f"The scale-bar label in '{self.path}' cannot be read — covered by a "
+                "long sample name, or not one of the five the software draws. Pass "
+                f"magnification= ({known}) or pixel_size= in µm per pixel."
+            )
+
+        self.magnification = magnification if magnification is not None else label_mag
+        self._pixel_size_given = pixel_size is not None
+        if pixel_size is not None:
+            self.pixel_size = float(pixel_size)
+        elif self.magnification is not None:
+            self.pixel_size = _MICROGRAPH_SCALE_UM[self.magnification] / _MICROGRAPH_SCALE_PX
+        else:
+            self.pixel_size = None
+
+        if remove_info_bar and not self.has_info_bar:
+            raise ValueError(
+                f"remove_info_bar=True, but '{self.path}' has no info bar: removing "
+                f"the bottom {_MICROGRAPH_BAR_ROWS} rows would cut away sample."
+            )
+        self.img = self.img_raw[:-_MICROGRAPH_BAR_ROWS] if remove_info_bar else self.img_raw
+
+    def __repr__(self) -> str:
+        if self.magnification is None:
+            mag = "unknown"
+        elif self.magnification == self.label_magnification:
+            mag = f"{self.magnification}× (read from the label)"
+        elif self.label_magnification is not None:
+            mag = f"{self.magnification}× (declared; label reads {self.label_magnification}×)"
+        else:
+            mag = f"{self.magnification}× (declared)"
+        if self.pixel_size is None:
+            size = "unknown — pass magnification= or pixel_size="
+        else:
+            size = f"{self.pixel_size:.5g} µm/px ({'given' if self._pixel_size_given else 'nominal'})"
+        bar = ("removed" if self.img.shape[0] < self.img_raw.shape[0] else "kept") \
+            if self.has_info_bar else "none"
+        return (
+            f"Micrograph — {self.img.shape[1]} × {self.img.shape[0]} px\n"
+            f"  File          : {self.path}\n"
+            f"  Info bar      : {bar}\n"
+            f"  Magnification : {mag}\n"
+            f"  Pixel size    : {size}\n"
+        )
 
 
 # ---------------------------------------------------------------------------

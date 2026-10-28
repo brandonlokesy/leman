@@ -58,6 +58,7 @@ from .loaders import (
     RamanSpectrum,
     RamanMap,
     DektakScan,
+    Micrograph,
 )
 from . import converters, hdf5, processing
 from .converters import (
@@ -84,6 +85,7 @@ __all__ = [
     "RamanSpectrum",
     "RamanMap",
     "DektakScan",
+    "Micrograph",
     "convert_image_csv_to_tiff",
     "convert_image_dir_to_tiff_stack",
     "convert_spectral_csv_to_hdf5",

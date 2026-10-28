@@ -1,0 +1,211 @@
+"""
+Tests for Micrograph — the main-lab Olympus microscope's JPEG export.
+
+Run against the committed examples (examples/data/optical-microscope/): 24 images
+with an info bar at 5×–100×, four BW_/aperture_ exports with none, and one
+transfer-stage image that must be refused. The label masks are cut from the
+``*_example_1`` files, so every other labelled example is an image the masks were
+not built from; those are the cases that show the match generalises.
+
+An overlong sample name is simulated by painting white over the bar and saving as
+PNG, which is lossless, so the painted pixels reach the loader unchanged.
+"""
+
+import importlib.util
+import re
+
+import numpy as np
+import pytest
+from PIL import Image
+
+from leman.loaders import Micrograph, _micrograph_masks
+
+from _paths import DATA
+
+ROOT = DATA / "optical-microscope"
+LABELLED = sorted(p for p in ROOT.glob("*.jpg") if re.match(r"\d+x_example_\d+", p.name))
+NO_BAR = sorted(p for p in ROOT.glob("*.jpg") if p.name.startswith(("BW_", "aperture_")))
+FIFTY = str(ROOT / "50x_example_2.jpg")
+BW = str(ROOT / "BW_example_50x.jpg")
+
+
+def magnification_in_name(path):
+    return int(re.match(r"(\d+)x_", path.name).group(1))
+
+
+def test_the_committed_examples_are_all_found():
+    assert len(LABELLED) == 24
+    assert len(NO_BAR) == 4
+
+
+# ---------------------------------------------------------------------------
+# Reading the bar
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", LABELLED, ids=lambda p: p.name)
+def test_every_label_reads_the_magnification_in_its_file_name(path):
+    img = Micrograph(str(path))
+    assert img.has_info_bar
+    assert img.label_magnification == magnification_in_name(path)
+    assert img.magnification == magnification_in_name(path)
+
+
+@pytest.mark.parametrize("path", NO_BAR, ids=lambda p: p.name)
+def test_an_export_without_a_bar_loads_with_nothing_known(path):
+    img = Micrograph(str(path))
+    assert not img.has_info_bar
+    assert img.label_magnification is None
+    assert img.magnification is None
+    assert img.pixel_size is None
+
+
+def test_an_image_from_another_instrument_is_refused():
+    with pytest.raises(ValueError, match="2848 × 2848 px"):
+        Micrograph(str(ROOT / "example_reject.png"))
+
+
+def test_nominal_pixel_size_is_the_scale_bar_over_363_px():
+    assert Micrograph(FIFTY).pixel_size == pytest.approx(50 / 363)
+
+
+def test_raw_image_is_the_full_rgb_frame():
+    img = Micrograph(FIFTY)
+    assert img.img_raw.shape == (2048, 2448, 3)
+    assert img.img_raw.dtype == np.uint8
+    assert img.img is img.img_raw
+
+
+# ---------------------------------------------------------------------------
+# A sample name long enough to run into the scale bar or the label
+# ---------------------------------------------------------------------------
+
+
+def painted(tmp_path, last_col):
+    """A real 50× frame with white text-like paint from column 600 to *last_col*."""
+    frame = np.asarray(Image.open(FIFTY).convert("RGB")).copy()
+    frame[2010:2047, 600:last_col + 1] = 255
+    out = tmp_path / "painted.png"
+    Image.fromarray(frame).save(out)
+    return str(out)
+
+
+def test_a_name_across_the_whole_scale_bar_still_reads(tmp_path):
+    img = Micrograph(painted(tmp_path, last_col=2185))
+    assert img.has_info_bar
+    assert img.magnification == 50
+
+
+def test_a_name_covering_the_label_is_unreadable_not_guessed(tmp_path):
+    path = painted(tmp_path, last_col=2300)
+    with pytest.raises(ValueError, match="cannot be read"):
+        Micrograph(path)
+    assert Micrograph(path, magnification=50).label_magnification is None
+
+
+# ---------------------------------------------------------------------------
+# Declared magnification, label_reads=, pixel_size=
+# ---------------------------------------------------------------------------
+
+
+def test_a_matching_magnification_is_accepted():
+    assert Micrograph(FIFTY, magnification=50).magnification == 50
+
+
+def test_a_disagreeing_magnification_is_refused_and_the_fix_is_named():
+    with pytest.raises(ValueError, match="magnification=100, label_reads=50"):
+        Micrograph(FIFTY, magnification=100)
+
+
+def test_label_reads_overrides_a_wrong_label():
+    img = Micrograph(FIFTY, magnification=100, label_reads=50)
+    assert img.magnification == 100
+    assert img.label_magnification == 50
+    assert img.pixel_size == pytest.approx(25 / 363)
+    assert "label reads 50×" in repr(img)
+
+
+def test_label_reads_must_match_the_label():
+    with pytest.raises(ValueError, match="reads 50×"):
+        Micrograph(FIFTY, magnification=100, label_reads=20)
+
+
+def test_label_reads_needs_magnification():
+    with pytest.raises(ValueError, match="needs magnification="):
+        Micrograph(FIFTY, label_reads=50)
+
+
+def test_label_reads_equal_to_magnification_is_refused():
+    with pytest.raises(ValueError, match="nothing to correct"):
+        Micrograph(FIFTY, magnification=50, label_reads=50)
+
+
+def test_label_reads_on_an_image_without_a_bar_is_refused():
+    with pytest.raises(ValueError, match="no info bar"):
+        Micrograph(BW, magnification=100, label_reads=50)
+
+
+def test_an_uncalibrated_magnification_is_refused():
+    with pytest.raises(ValueError, match="pixel_size="):
+        Micrograph(BW, magnification=40)
+
+
+def test_magnification_on_an_image_without_a_bar():
+    img = Micrograph(BW, magnification=50)
+    assert img.magnification == 50
+    assert img.pixel_size == pytest.approx(50 / 363)
+
+
+def test_pixel_size_replaces_the_nominal_value_and_keeps_the_label():
+    img = Micrograph(FIFTY, pixel_size=0.14)
+    assert img.pixel_size == 0.14
+    assert img.magnification == 50
+    assert "given" in repr(img)
+
+
+def test_pixel_size_with_magnification_is_refused():
+    with pytest.raises(ValueError, match="not both"):
+        Micrograph(BW, magnification=50, pixel_size=0.14)
+
+
+@pytest.mark.parametrize("bad", [0, -0.1, float("nan")])
+def test_a_non_positive_pixel_size_is_refused(bad):
+    with pytest.raises(ValueError, match="positive"):
+        Micrograph(BW, pixel_size=bad)
+
+
+# ---------------------------------------------------------------------------
+# remove_info_bar=
+# ---------------------------------------------------------------------------
+
+
+def test_removing_the_bar_drops_46_rows_and_leaves_the_raw_frame():
+    img = Micrograph(FIFTY, remove_info_bar=True)
+    assert img.img.shape == (2002, 2448, 3)
+    assert img.img_raw.shape == (2048, 2448, 3)
+    np.testing.assert_array_equal(img.img, img.img_raw[:2002])
+
+
+def test_removing_a_bar_that_is_not_there_is_refused():
+    with pytest.raises(ValueError, match="no info bar"):
+        Micrograph(BW, remove_info_bar=True)
+
+
+# ---------------------------------------------------------------------------
+# The shipped masks
+# ---------------------------------------------------------------------------
+
+
+def test_shipped_masks_match_a_rebuild_from_the_committed_examples():
+    """A stale .npz, or a box or threshold changed without re-running the script."""
+    script = DATA.parent.parent / "dev" / "build_micrograph_masks.py"
+    spec = importlib.util.spec_from_file_location("build_micrograph_masks", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    rebuilt = module.build_masks()
+
+    x_mask, label_masks = _micrograph_masks()
+    np.testing.assert_array_equal(x_mask, rebuilt["x"])
+    assert set(label_masks) == {int(k) for k in rebuilt if k != "x"}
+    for m, mask in label_masks.items():
+        np.testing.assert_array_equal(mask, rebuilt[str(m)])
