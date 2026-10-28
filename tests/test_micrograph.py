@@ -14,11 +14,20 @@ PNG, which is lossless, so the painted pixels reach the loader unchanged.
 import importlib.util
 import re
 
+import matplotlib
+matplotlib.use("Agg", force=True)      # headless: render without a display
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from matplotlib.image import AxesImage
+from matplotlib_scalebar.scalebar import ScaleBar
 from PIL import Image
 
 from leman.loaders import Micrograph, _micrograph_masks
+from leman.plotting import MicrographPlot, plot_micrograph
 
 from _paths import DATA
 
@@ -189,6 +198,75 @@ def test_removing_the_bar_drops_46_rows_and_leaves_the_raw_frame():
 def test_removing_a_bar_that_is_not_there_is_refused():
     with pytest.raises(ValueError, match="no info bar"):
         Micrograph(BW, remove_info_bar=True)
+
+
+# ---------------------------------------------------------------------------
+# plot_micrograph
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _close_figures():
+    yield
+    plt.close("all")
+
+
+def test_the_return_is_named_in_order_and_still_a_tuple():
+    # Written out, so renaming or reordering a field has to be done here too.
+    assert MicrographPlot._fields == ("fig", "ax", "im", "scalebar")
+    res = plot_micrograph(Micrograph(FIFTY))
+    assert type(res) is MicrographPlot
+    fig, ax, im, scalebar = res
+    assert (fig, ax, im, scalebar) == (res.fig, res.ax, res.im, res.scalebar)
+
+
+def test_the_members_hold_what_their_names_say():
+    res = plot_micrograph(Micrograph(FIFTY))
+    assert isinstance(res.fig, Figure)
+    assert isinstance(res.ax, Axes)
+    assert isinstance(res.im, AxesImage)
+    assert isinstance(res.scalebar, ScaleBar)
+    assert res.scalebar in res.ax.artists
+
+
+def test_the_scale_bar_uses_the_micrographs_pixel_size_in_um():
+    res = plot_micrograph(Micrograph(FIFTY, magnification=100, label_reads=50))
+    assert res.scalebar.dx == pytest.approx(25 / 363)
+    assert res.scalebar.units == "um"
+
+
+def test_scalebar_keywords_reach_the_scale_bar():
+    res = plot_micrograph(Micrograph(FIFTY), location="lower right", fixed_value=10,
+                          font_properties={"size": 24})
+    # Stored as matplotlib's legend code: 4 is "lower right".
+    assert res.scalebar.location == 4
+    assert res.scalebar.fixed_value == 10
+
+
+def test_the_image_drawn_is_img_so_a_removed_bar_stays_removed():
+    res = plot_micrograph(Micrograph(FIFTY, remove_info_bar=True))
+    assert res.im.get_array().shape == (2002, 2448, 3)
+
+
+def test_the_axes_are_hidden():
+    assert not plot_micrograph(Micrograph(FIFTY)).ax.axison
+
+
+def test_no_scale_bar_gives_a_none_member():
+    assert plot_micrograph(Micrograph(FIFTY), scalebar=False).scalebar is None
+
+
+def test_an_unknown_pixel_size_refuses_a_scale_bar_but_still_plots_without():
+    img = Micrograph(BW)
+    with pytest.raises(ValueError, match="magnification= or pixel_size="):
+        plot_micrograph(img)
+    assert plot_micrograph(img, scalebar=False).scalebar is None
+
+
+def test_drawing_into_given_axes():
+    fig, ax = plt.subplots()
+    res = plot_micrograph(Micrograph(FIFTY), ax=ax)
+    assert res.ax is ax and res.fig is fig
 
 
 # ---------------------------------------------------------------------------
