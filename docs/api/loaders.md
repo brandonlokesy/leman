@@ -31,4 +31,11 @@ TRPL sweep, and neither does `spectra`: handing one to a spectral plot raises
 rather than drawing time as if it were wavelength. Each class rejects the other's
 files by name.
 
+`Micrograph` loads a bright-field image from the main-lab Olympus microscope. The
+export has no metadata, so the magnification — and from it the pixel size — is read
+from the scale-bar label the software draws into the image. An image exported
+without that bar loads too, and takes `magnification=` or a measured `pixel_size=`;
+`label_reads=` corrects an image saved with the software set to the wrong objective.
+`plotting.plot_micrograph` draws it with a scale bar.
+
 ::: leman.loaders

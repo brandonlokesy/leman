@@ -1058,6 +1058,29 @@ has aligned the axes themselves has a route in, with no extra API.
 | `ACImgSweep` | a directory of numeric-grid CSVs | image sequence for diffusion work |
 | `SingleImage`, `ACSampleImg`, `ACImg` | one numeric-grid CSV | share `_ACImg`; only `ACImg` takes `bg_region=` — see below |
 | `ACLaserRefImg` | one numeric-grid CSV | fits the laser spot centre and 1/e² radius on construction |
+| `Micrograph` | one Olympus microscope JPEG, 2448 × 2048 RGB | reads the magnification from the label in the info bar; see below |
+
+## `Micrograph` — a magnification read from pixels
+
+The export records the magnification only as the text of its scale-bar label, so the
+loader reads it: `_read_micrograph_bar` matches the `X:` that opens the bar, then the
+label, against the masks in `src/leman/data/micrograph_masks.npz` (Jaccard index of
+"darkest channel ≥ 230" pixels). Every box and threshold is a `_MICROGRAPH_*`
+constant in `loaders.py`; `dev/build_micrograph_masks.py` imports them to cut the
+masks, so changing one means re-running the script, and a test fails until it is.
+
+What the object then carries:
+
+| Attribute | Value |
+|---|---|
+| `label_magnification` | what the label reads, or `None` (no bar, or unreadable) |
+| `magnification` | `magnification=` if given, else the label |
+| `pixel_size` | `pixel_size=` if given, else nominal µm/px for `magnification`, else `None` |
+| `img_raw` / `img` | the frame as saved / the same array, or its first 2002 rows with `remove_info_bar=True` |
+
+`plot_micrograph` draws `img` and a `matplotlib-scalebar` `ScaleBar` built from
+`pixel_size`; it does no maths of its own. Format facts:
+`dev/instruments/olympus-microscope.md`. The choices and what was rejected: 0041.
 
 ## `BTSpectralSweep` — what a second instrument costs
 
