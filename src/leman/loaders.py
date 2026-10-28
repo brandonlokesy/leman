@@ -7727,6 +7727,37 @@ class ACImg(_ACImg):
 
 
 # ---------------------------------------------------------------------------
+# Micrograph — Olympus bright-field microscope, main lab
+# ---------------------------------------------------------------------------
+
+# Geometry of the exporter's info bar. Every position is fixed by the software,
+# in pixels of the full 2448 × 2048 frame: dev/instruments/olympus-microscope.md.
+_MICROGRAPH_SHAPE      = (2048, 2448)                # rows, cols
+_MICROGRAPH_BAR_ROWS   = 46                           # info bar height
+_MICROGRAPH_SCALE_PX   = 363                          # scale bar length
+_MICROGRAPH_SCALE_UM   = {5: 500, 10: 250, 20: 125, 50: 50, 100: 25}
+_MICROGRAPH_SCALE_COLS = slice(1800, 2163)
+_MICROGRAPH_SCALE_ROWS = slice(2026, 2034)            # core rows, JPEG-soft edges excluded
+# Label glyphs start at column 2201; the box opens at 2190 so a long sample name
+# can run a little past the scale bar before it reaches the label.
+_MICROGRAPH_LABEL_BOX  = (slice(2002, 2048), slice(2190, 2448))
+_MICROGRAPH_X_BOX      = (slice(2002, 2048), slice(0, 56))   # the "X:" that opens the bar
+# The bar is a translucent grey overlay, so what lies under it shows through. The
+# brightest non-text pixel measured in it is 197 (darkest channel, white sample
+# beneath); text is white in every channel.
+_MICROGRAPH_TEXT_MIN   = 230
+_MICROGRAPH_LABEL_MIN  = 0.9
+_MICROGRAPH_X_MIN      = 0.8
+
+
+def _micrograph_text_mask(box: np.ndarray) -> np.ndarray:
+    """Pixels of *box* that are overlay text: bright in every colour channel."""
+    # (rows, cols, 3) -> (rows, cols): the darkest channel decides, so a saturated
+    # colour seen through the overlay (bright in one channel only) is not text.
+    return box.min(axis=-1) >= _MICROGRAPH_TEXT_MIN
+
+
+# ---------------------------------------------------------------------------
 # DektakScan — Bruker Dektak profilometer
 # ---------------------------------------------------------------------------
 
