@@ -19,6 +19,8 @@ dependencies = [
     "requests",
     "h5py",
     "tifffile",
+    "pillow",
+    "matplotlib-scalebar",
 ]
 
 [project.scripts]
@@ -40,3 +42,10 @@ test = ["pytest"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Non-Python files installed with the package. setuptools copies only .py files
+# unless told otherwise; an editable install reads the source tree directly, so a
+# missing entry here passes every local test and fails only on someone else's
+# machine.
+[tool.setuptools.package-data]
+leman = ["data/*.npz"]

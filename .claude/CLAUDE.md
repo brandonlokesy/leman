@@ -9,7 +9,9 @@ workflow for the group (~15 people max) — so error messages, defaults, and doc
 are held to a shared-library standard, not a personal-script one.
 
 **Class-name prefixes:** AC = AttoCube (cryogenic confocal), BT = BigTable (LabRAM
-export format).
+export format). `Micrograph` is unprefixed: it is the main-lab Olympus microscope,
+the group's only imaging microscope; another setup's images (the transfer stage)
+take a name of their own.
 
 **Samples:** TMDCs in FET structures (bottom-, top-, dual-gated) or in cavities.
 
@@ -21,7 +23,8 @@ Raman spectroscopy.
 **Measurements this package supports:** PL, reflectance / reflectance contrast,
 time-resolved PL, real-space imaging, and Raman — single spectra (`RamanSpectrum`) and
 2-D spatial maps (`RamanMap`), which are two different LabRAM export shapes, not one
-loader with a flag. Absorption, cavity, and BFP/k-space data are
+loader with a flag — and bright-field optical micrographs (`Micrograph`). Absorption,
+cavity, and BFP/k-space data are
 measured in the lab but have no loader. Don't propose speculative multi-modality
 abstractions unasked — but do flag where a PL assumption will resist a future loader.
 
@@ -349,6 +352,18 @@ keyword in the index there. Don't re-litigate, and don't "helpfully" restore.
   `ACSpectralSweep`. The format needs a field recording which instrument
   wrote the file first; until then both directions refuse, with one shared
   message.
+- Don't give `Micrograph` an `override_magnification=` switch, or let a
+  disagreeing `magnification=` win over a readable label. The override is
+  `label_reads=`, which passes only where the label shows that value; a measured
+  calibration is `pixel_size=`. Don't let `pixel_size=` and `magnification=` be
+  combined. 0041.
+- Don't guess an unreadable micrograph label, lower the 0.9 label threshold to the
+  gap's midpoint, or detect the info bar by an edge at row 2002 or by the scale
+  bar's exact extent — the overlay is translucent and a sample name can join the
+  bar. The bar is recognised by its `X:`.
+- Don't install `examples/data` with the package. Shipped data lives in
+  `src/leman/data/` and is listed under `package-data`; the micrograph masks are
+  rebuilt by `dev/build_micrograph_masks.py`, never edited by hand.
 
 ## Known issues — check before "helpfully" fixing
 

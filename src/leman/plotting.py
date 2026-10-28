@@ -268,6 +268,28 @@ class ImagePlot(NamedTuple):
     cb     : object
 
 
+class MicrographPlot(NamedTuple):
+    """
+    What :func:`plot_micrograph` drew.
+
+    A tuple, so ``fig, ax, im, scalebar = plot_micrograph(...)`` unpacks, with names
+    for reaching one member without counting positions.
+
+    Attributes
+    ----------
+    fig : matplotlib.figure.Figure
+    ax : matplotlib.axes.Axes
+    im : matplotlib.image.AxesImage
+    scalebar : matplotlib_scalebar.scalebar.ScaleBar or None
+        ``None`` when the plot was drawn with ``scalebar=False``.  Carried so its
+        length, position and font can be changed after drawing.
+    """
+    fig      : object
+    ax       : object
+    im       : object
+    scalebar : object
+
+
 class SpectralSeriesPlot(NamedTuple):
     """
     What :func:`plot_spectral_series` drew.
@@ -1703,6 +1725,88 @@ def plot_image(
                            else "Intensity (counts)"))
 
     return ImagePlot(fig, ax, im, circle, cb)
+
+
+def plot_micrograph(
+    micrograph,
+    ax       = None,
+    figsize  : tuple = (6, 5),
+    scalebar : bool  = True,
+    **scalebar_kwargs,
+) -> MicrographPlot:
+    """
+    Show a microscope image in its own colours, with a scale bar.
+
+    The image is drawn without axes; ``ax.set_axis_on()`` brings the pixel ticks
+    back.  The scale bar's length is chosen automatically from the image's pixel
+    size unless *fixed_value* is passed.
+
+    Parameters
+    ----------
+    micrograph : Micrograph
+        A :class:`~leman.loaders.Micrograph`.  Its :attr:`img` is drawn, so an
+        image loaded with ``remove_info_bar=True`` is drawn without the bar.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw into.  A new figure is made when omitted.
+    figsize : tuple
+        Size of the new figure in inches.  Ignored when *ax* is given.
+    scalebar : bool
+        Draw the scale bar.  Default ``True``.
+    **scalebar_kwargs
+        Passed to ``matplotlib_scalebar.scalebar.ScaleBar``: for example
+        ``location="lower right"``, ``color="white"``, ``box_alpha=0`` (no
+        background box), ``font_properties={"size": 20}``, ``length_fraction=0.25``,
+        or ``fixed_value=10`` for a bar of exactly 10 µm.
+
+    Returns
+    -------
+    MicrographPlot
+        Named 4-tuple of the figure, axes, image and scale bar.
+
+    Raises
+    ------
+    ValueError
+        If *scalebar* is set and the micrograph's pixel size is unknown — an image
+        exported without its info bar, loaded without ``magnification=`` or
+        ``pixel_size=``; or if scale-bar keywords are given with ``scalebar=False``.
+
+    Examples
+    --------
+    >>> img = Micrograph("flake_50x.jpg", remove_info_bar=True)
+    >>> fig, ax, im, sb = plot_micrograph(
+    ...     img, location="lower right", color="white", box_alpha=0,
+    ...     font_properties={"size": 24},
+    ... )
+    """
+    if not scalebar and scalebar_kwargs:
+        raise ValueError(
+            f"Scale-bar keywords {sorted(scalebar_kwargs)} were given with "
+            "scalebar=False, so they would have no effect."
+        )
+    if scalebar and micrograph.pixel_size is None:
+        raise ValueError(
+            f"No scale bar can be drawn for '{micrograph.path}': its pixel size is "
+            "unknown. Load it with magnification= or pixel_size=, or pass "
+            "scalebar=False."
+        )
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.get_figure()
+
+    im = ax.imshow(micrograph.img)
+    ax.set_axis_off()
+
+    sb = None
+    if scalebar:
+        # Imported on use, so the rest of the package works in an environment
+        # that lacks matplotlib-scalebar; only drawing a scale bar needs it.
+        from matplotlib_scalebar.scalebar import ScaleBar
+        sb = ScaleBar(micrograph.pixel_size, units="um", **scalebar_kwargs)
+        ax.add_artist(sb)
+
+    return MicrographPlot(fig, ax, im, sb)
 
 
 _VOIGT_PARAM_KEYS = ["center", "amp", "fwhm_g", "fwhm_l"]
