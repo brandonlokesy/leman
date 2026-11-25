@@ -83,19 +83,56 @@ def gaussian(x, amplitude, center, fwhm):
     return amplitude * np.exp(-0.5 * ((x - center) / sigma)**2)
 
 
+def _pseudo_voigt_fwhm_eta(fwhm_g, fwhm_l):
+    """
+    Total FWHM and Lorentzian fraction *eta* of the Thompson pseudo-Voigt.
+
+    Shared by :func:`voigt_approx` and :func:`voigt_area` so the lineshape
+    and its integral can never disagree.
+    """
+    fwhm = 0.5346 * fwhm_l + np.sqrt(0.2166 * fwhm_l**2 + fwhm_g**2)
+    r    = fwhm_l / fwhm
+    eta  = 1.36603 * r - 0.47719 * r**2 + 0.11116 * r**3
+    return fwhm, eta
+
+
 def voigt_approx(x, amplitude, center, fwhm_g, fwhm_l):
     """
     Pseudo-Voigt approximation (Thompson et al. 1987).
     A weighted sum of Gaussian and Lorentzian with the same FWHM.
     """
-    fwhm = 0.5346 * fwhm_l + np.sqrt(0.2166 * fwhm_l**2 + fwhm_g**2)
-    eta  = (1.36603 * (fwhm_l / fwhm)
-            - 0.47719 * (fwhm_l / fwhm)**2
-            + 0.11116 * (fwhm_l / fwhm)**3)
+    fwhm, eta = _pseudo_voigt_fwhm_eta(fwhm_g, fwhm_l)
     return amplitude * (
         eta * lorentzian(x, 1.0, center, fwhm) +
         (1 - eta) * gaussian(x, 1.0, center, fwhm)
     )
+
+
+# ---------------------------------------------------------------------------
+# Integrated areas
+# ---------------------------------------------------------------------------
+#
+# The lineshapes above are parametrised by peak HEIGHT (``amplitude`` is the
+# value at the center).  The number of photons a species emits is the area
+# under its peak, ~ height x width x shape factor.  When the width changes
+# across a sweep (e.g. power broadening), height and area scale differently,
+# and only the area tracks the emitted intensity.
+
+def lorentzian_area(amplitude, fwhm):
+    """Integral over all x of :func:`lorentzian` (peak height *amplitude*)."""
+    return amplitude * np.pi * fwhm / 2.0
+
+
+def gaussian_area(amplitude, fwhm):
+    """Integral over all x of :func:`gaussian` (peak height *amplitude*)."""
+    return amplitude * fwhm * np.sqrt(np.pi / (4.0 * np.log(2.0)))
+
+
+def voigt_area(amplitude, fwhm_g, fwhm_l):
+    """Integral over all x of :func:`voigt_approx` (peak height *amplitude*)."""
+    fwhm, eta = _pseudo_voigt_fwhm_eta(fwhm_g, fwhm_l)
+    return (eta * lorentzian_area(amplitude, fwhm)
+            + (1.0 - eta) * gaussian_area(amplitude, fwhm))
 
 
 def multi_lorentzian(x, *params):
@@ -2155,6 +2192,12 @@ class PeakTrack:
         All ``True`` when ``method="argmax"``.
     method          : str
         Tracking method used: ``"argmax"``.
+    peak_areas      : np.ndarray or None
+        Integrated intensity of the peak at each sweep point (counts·eV),
+        i.e. the area under the fitted lineshape.  This, not
+        ``peak_amplitudes``, is proportional to the emitted photon number
+        when the linewidth changes across the sweep.  ``None`` when the
+        tracking method has no lineshape (``"argmax"``).
     """
     sweep_values    : np.ndarray
     sweep_label     : str
@@ -2164,6 +2207,7 @@ class PeakTrack:
     peak_errors     : np.ndarray
     converged       : np.ndarray
     method          : str
+    peak_areas      : np.ndarray = None
 
     def __repr__(self) -> str:
         n = len(self.peak_energies)
@@ -2263,6 +2307,13 @@ def track_peak_energies(
         method_label    = _model_label(
             model, _resolve_baseline(baseline)[0],
         )
+        area_fn = gaussian_area if model == "gaussian" else lorentzian_area
+        peak_areas = np.array([
+            area_fn(r.params["amplitude"], r.params["fwhm"])
+            if "fwhm" in r.params else np.nan
+            for r in results
+        ])
+        peak_areas[~converged] = np.nan
 
         return PeakTrack(
             sweep_values    = sweep_values,
@@ -2273,6 +2324,7 @@ def track_peak_energies(
             peak_errors     = peak_errors,
             converged       = converged,
             method          = method_label,
+            peak_areas      = peak_areas,
         )
 
     # --- argmax ---
@@ -2489,6 +2541,7 @@ def _extract_linear_fits(
     unit         : str = "",
     param_name   : str = "coord_ranges",
     stacklevel   : int = 3,
+    masks        : list = None,
 ) -> list:
     """
     Fit a line within each coordinate or index range.
@@ -2519,6 +2572,12 @@ def _extract_linear_fits(
         External parameter name for error messages.
     stacklevel : int
         Extra stack depth for warnings (callers add one per wrapper).
+    masks : list of np.ndarray, optional
+        Pre-built range masks.  When given, *coord_ranges* and
+        *index_ranges* are ignored.  Needed when the fit is done in a
+        transformed coordinate (e.g. log of the sweep) but the ranges are
+        stated in the raw sweep coordinate: build the masks on the raw
+        values, then fit the transformed ones.
 
     Returns
     -------
@@ -2531,10 +2590,11 @@ def _extract_linear_fits(
             f"Choose from {_FIT_METHODS}."
         )
 
-    masks = _resolve_sweep_ranges(
-        x_values, coord_ranges, index_ranges, n_sweeps,
-        unit=unit, param_name=param_name,
-    )
+    if masks is None:
+        masks = _resolve_sweep_ranges(
+            x_values, coord_ranges, index_ranges, n_sweeps,
+            unit=unit, param_name=param_name,
+        )
 
     segments = []
     for i, mask in enumerate(masks):
@@ -2853,17 +2913,22 @@ class AmplitudeScalingResult:
         The coordinate ranges passed by the caller, or ``None``.
     index_ranges  : list or None
         The index ranges passed by the caller, or ``None``.
+    intensity     : str
+        Which intensity was fitted: ``"area"`` (integrated) or
+        ``"height"`` (peak amplitude).
     """
     track        : PeakTrack
     segments     : list
     coord_ranges : list
     index_ranges : list
+    intensity    : str = "height"
 
     def __repr__(self) -> str:
         n = len(self.segments)
         lines = [
             f"AmplitudeScalingResult ({n} segment{'s' if n != 1 else ''}, "
-            f"track method: {self.track.method})"
+            f"track method: {self.track.method}, "
+            f"intensity: {self.intensity})"
         ]
         for i, seg in enumerate(self.segments):
             if self.coord_ranges is not None:
@@ -2893,6 +2958,7 @@ def extract_amplitude_scaling(
     fit_method   : str   = "wls",
     n_bootstrap  : int   = 2000,
     rng          = None,
+    intensity    : str   = "area",
 ) -> AmplitudeScalingResult:
     """
     Extract the amplitude scaling exponent from a log-log fit.
@@ -2914,7 +2980,10 @@ def extract_amplitude_scaling(
     source : scan or PeakTrack
         A sweep object or an already-computed :class:`PeakTrack`.
     coord_ranges : list of (lo, hi), optional
-        Sweep-coordinate ranges, both endpoints inclusive.
+        Sweep-coordinate ranges in the sweep's own units (e.g. µW), both
+        endpoints inclusive — not log units, even though the fit itself is
+        done in log space.  (Before this was fixed the ranges were
+        silently compared against ``log(sweep)``.)
     index_ranges : list of (start, stop), optional
         Sweep-index ranges, both endpoints inclusive.
     x_range : tuple of (E_min, E_max) in eV, optional
@@ -2927,11 +2996,24 @@ def extract_amplitude_scaling(
     n_bootstrap : int
         Bootstrap iterations (only for ``fit_method="bootstrap"``).
     rng : np.random.Generator, optional
+    intensity : {"area", "height"}
+        ``"area"`` (default) fits the integrated peak area
+        (``track.peak_areas``), which is proportional to the emitted photon
+        number.  ``"height"`` fits the peak amplitude, which underestimates
+        the exponent whenever the peak broadens with the sweep.  Tracks
+        without areas (``"argmax"``) fall back to height with a warning.
 
     Returns
     -------
     AmplitudeScalingResult
     """
+    _INTENSITIES = ("area", "height")
+    if intensity not in _INTENSITIES:
+        raise ValueError(
+            f"intensity={intensity!r} is not recognised. "
+            f"Choose from {_INTENSITIES}."
+        )
+
     if isinstance(source, PeakTrack):
         track = source
     else:
@@ -2939,7 +3021,19 @@ def extract_amplitude_scaling(
             source, method=track_method, x_range=x_range,
         )
 
-    amplitudes = track.peak_amplitudes.copy().astype(float)
+    if intensity == "area" and track.peak_areas is None:
+        warnings.warn(
+            f"intensity='area' but this track (method {track.method!r}) has "
+            f"no peak areas; fitting peak height instead. Track with a "
+            f"lineshape fit to get areas, or pass intensity='height' to "
+            f"silence this.",
+            UserWarning, stacklevel=2,
+        )
+        intensity = "height"
+
+    source_values = (track.peak_areas if intensity == "area"
+                     else track.peak_amplitudes)
+    amplitudes = np.asarray(source_values).copy().astype(float)
     bad = amplitudes <= 0
     if bad.any():
         warnings.warn(
@@ -2966,6 +3060,14 @@ def extract_amplitude_scaling(
     # fitters fall back to unweighted.
     y_errors = np.full_like(log_amp, np.nan)
 
+    # Ranges are stated in sweep units, so resolve them on the raw sweep
+    # values, then fit in log space.
+    masks = _resolve_sweep_ranges(
+        track.sweep_values.astype(float), coord_ranges, index_ranges,
+        len(track.peak_energies),
+        unit=track.sweep_unit, param_name="coord_ranges",
+    )
+
     fits = _extract_linear_fits(
         x_values=log_sweep,
         y_values=log_amp,
@@ -2978,6 +3080,7 @@ def extract_amplitude_scaling(
         rng=rng,
         unit=track.sweep_unit,
         param_name="coord_ranges",
+        masks=masks,
     )
 
     segments = [
@@ -2999,6 +3102,7 @@ def extract_amplitude_scaling(
             [tuple(r) for r in index_ranges]
             if index_ranges is not None else None
         ),
+        intensity=intensity,
     )
 
 
@@ -3217,10 +3321,11 @@ def track_multi_peak_energies(
     seeds        : list  = None,
     peak_windows : list  = None,
     x_range      : tuple = None,
-    center_tol   : float = 0.03,
+    center_tol           = 0.03,
     fwhm_seed    : float = 0.02,
     fwhm_range   : tuple = (0.002, 0.15),
     baseline     : str   = "constant",
+    center_mode  : str   = "moving",
 ) -> MultiPeakTrackResult:
     """
     Track multiple overlapping peaks simultaneously across a sweep.
@@ -3244,10 +3349,23 @@ def track_multi_peak_energies(
         each window).
     x_range : tuple of (E_min, E_max) in eV, optional
         Spectral fitting window.  All peaks must lie within it.
-    center_tol : float
-        Maximum drift per sweep point (eV).  Each peak's center is
-        bounded within ``center_tol`` of the previous point's fitted
-        center (or the initial seed at point 0).
+    center_tol : float or list of float
+        Half-width of each peak's allowed center window (eV).  A list
+        gives one value per peak.  What the window is centered on depends
+        on *center_mode*.
+    center_mode : {"moving", "fixed"}
+        ``"moving"`` (default)
+            Each point's window is ``center_tol`` around the previous
+            point's fitted center, so the window follows the peak.  Use
+            when peaks shift a lot across the sweep (e.g. Stark shifts in
+            a gate sweep).  Drift accumulates: a bad fit at one point
+            moves the window for every point after it.
+        ``"fixed"``
+            Every point's window is ``center_tol`` around the original
+            seed, so a peak can never end up more than ``center_tol``
+            from its seed and a bad fit cannot propagate.  Use when the
+            total shift is small (e.g. power sweeps).  The previous fit
+            is still used as the starting guess.
     fwhm_seed : float
         Initial FWHM guess for both Gaussian and Lorentzian components
         (eV).
@@ -3262,7 +3380,16 @@ def track_multi_peak_energies(
         species), ``.fit_results`` (list of :class:`FitResult`, one per
         sweep point with the full model curve), and ``.energy`` (the
         windowed energy axis).  Iterating over the result yields the
-        tracks.
+        tracks.  Each track carries ``peak_areas`` (integrated
+        pseudo-Voigt area) as well as ``peak_amplitudes`` (height).
+
+    Warns
+    -----
+    UserWarning
+        With ``center_mode="fixed"``, if two peaks' windows overlap (they
+        could swap).  In either mode, for each peak whose fitted center
+        sits on its window edge at some sweep points — the bound, not the
+        data, set those centers.
 
     Raises
     ------
@@ -3288,6 +3415,37 @@ def track_multi_peak_energies(
             f"track_multi_peak_energies requires at least 2 peaks, "
             f"got {n_peaks}. For a single peak, use track_peak_energies."
         )
+
+    _CENTER_MODES = ("moving", "fixed")
+    if center_mode not in _CENTER_MODES:
+        raise ValueError(
+            f"center_mode={center_mode!r} is not recognised. "
+            f"Choose from {_CENTER_MODES}."
+        )
+
+    if np.ndim(center_tol) == 0:
+        tols = [float(center_tol)] * n_peaks
+    else:
+        tols = [float(t) for t in center_tol]
+        if len(tols) != n_peaks:
+            raise ValueError(
+                f"center_tol has {len(tols)} values but there are "
+                f"{n_peaks} peaks; give one per peak or a single scalar."
+            )
+
+    if center_mode == "fixed":
+        for a in range(n_peaks):
+            for b in range(a + 1, n_peaks):
+                gap = abs(seeds[a] - seeds[b])
+                if gap < tols[a] + tols[b]:
+                    warnings.warn(
+                        f"Fixed center windows of peaks {a} "
+                        f"({seeds[a]:.4f} ± {tols[a]:.4f} eV) and {b} "
+                        f"({seeds[b]:.4f} ± {tols[b]:.4f} eV) overlap; "
+                        f"the two components can swap or merge. Reduce "
+                        f"center_tol for these peaks.",
+                        UserWarning, stacklevel=2,
+                    )
 
     for attr in ("best_energy_spectra", "energy"):
         if not hasattr(scan, attr):
@@ -3319,8 +3477,10 @@ def track_multi_peak_energies(
     # Per-species accumulators.
     all_centers = np.full((n_peaks, n_sweeps), np.nan)
     all_amps    = np.full((n_peaks, n_sweeps), np.nan)
+    all_areas   = np.full((n_peaks, n_sweeps), np.nan)
     all_errors  = np.full((n_peaks, n_sweeps), np.nan)
     all_conv    = np.zeros((n_peaks, n_sweeps), dtype=bool)
+    all_at_edge = np.zeros((n_peaks, n_sweeps), dtype=bool)
     all_fits    = []
 
     current_seeds = list(seeds)
@@ -3328,18 +3488,20 @@ def track_multi_peak_energies(
     for j in range(n_sweeps):
         spectrum = spectra[:, j].astype(float)
 
-        # Build p0 and bounds from the current (propagated) seeds.
+        # p0 always starts from the previous fit.  The bounds follow it in
+        # "moving" mode and stay on the original seeds in "fixed" mode.
         p0_list = []
         lo_list = []
         hi_list = []
-        for s in current_seeds:
+        for k, s in enumerate(current_seeds):
+            anchor = s if center_mode == "moving" else seeds[k]
             nearest_idx = int(np.argmin(np.abs(energy - s)))
             amp_guess = float(spectrum[nearest_idx])
             if amp_guess <= 0:
                 amp_guess = float(np.nanmax(spectrum)) / n_peaks
             p0_list.extend([amp_guess, s, fwhm_seed, fwhm_seed])
-            lo_list.extend([0.0,    s - center_tol, fwhm_lo, fwhm_lo])
-            hi_list.extend([np.inf, s + center_tol, fwhm_hi, fwhm_hi])
+            lo_list.extend([0.0,    anchor - tols[k], fwhm_lo, fwhm_lo])
+            hi_list.extend([np.inf, anchor + tols[k], fwhm_hi, fwhm_hi])
 
         result = fit_multi_voigt(
             energy, spectrum,
@@ -3351,16 +3513,38 @@ def track_multi_peak_energies(
 
         if result.converged:
             for k in range(n_peaks):
-                all_centers[k, j] = result.params[f"center_{k}"]
-                all_amps[k, j]    = result.params[f"amp_{k}"]
+                q = result.params
+                all_centers[k, j] = q[f"center_{k}"]
+                all_amps[k, j]    = q[f"amp_{k}"]
+                all_areas[k, j]   = voigt_area(
+                    q[f"amp_{k}"], q[f"fwhm_g_{k}"], q[f"fwhm_l_{k}"],
+                )
                 all_errors[k, j]  = result.errors[f"center_{k}"]
                 all_conv[k, j]    = True
+                c_lo, c_hi = lo_list[4 * k + 1], hi_list[4 * k + 1]
+                edge_tol = 1e-3 * (c_hi - c_lo)
+                all_at_edge[k, j] = (q[f"center_{k}"] - c_lo < edge_tol
+                                     or c_hi - q[f"center_{k}"] < edge_tol)
             current_seeds = [
                 result.params[f"center_{k}"] for k in range(n_peaks)
             ]
         else:
             warnings.warn(
                 f"Multi-peak fit did not converge at sweep point {j}.",
+                UserWarning, stacklevel=2,
+            )
+
+    for k in range(n_peaks):
+        n_edge = int(all_at_edge[k].sum())
+        if n_edge:
+            idx = np.flatnonzero(all_at_edge[k])
+            shown = ", ".join(str(i) for i in idx[:10])
+            more = ", …" if idx.size > 10 else ""
+            warnings.warn(
+                f"Peak {k} (seed {seeds[k]:.4f} eV) has its fitted center on "
+                f"the edge of its ±{tols[k]:.4f} eV window at {n_edge} sweep "
+                f"point(s) [{shown}{more}]; the bound, not the data, set "
+                f"those centers. Check those fits.",
                 UserWarning, stacklevel=2,
             )
 
@@ -3379,6 +3563,7 @@ def track_multi_peak_energies(
             peak_errors     = all_errors[k],
             converged       = all_conv[k],
             method          = method_label,
+            peak_areas      = all_areas[k],
         ))
 
     return MultiPeakTrackResult(
