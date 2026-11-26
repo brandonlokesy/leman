@@ -20,7 +20,13 @@ from leman.fitting import (
     extract_amplitude_scaling,
     extract_dipole_lengths,
     extract_energy_shift,
+    gaussian,
+    gaussian_area,
+    lorentzian,
+    lorentzian_area,
     track_multi_peak_energies,
+    voigt_approx,
+    voigt_area,
     track_peak_energies,
 )
 
@@ -527,7 +533,7 @@ class TestExtractAmplitudeScaling:
             method="argmax",
         )
         result = extract_amplitude_scaling(
-            track, index_ranges=[(0, 5)],
+            track, index_ranges=[(0, 5)], intensity="height",
         )
         assert isinstance(result, AmplitudeScalingResult)
         assert len(result.segments) == 1
@@ -552,7 +558,7 @@ class TestExtractAmplitudeScaling:
             method="argmax",
         )
         result = extract_amplitude_scaling(
-            track, index_ranges=[(0, 9), (10, 19)],
+            track, index_ranges=[(0, 9), (10, 19)], intensity="height",
         )
         assert len(result.segments) == 2
         assert result.segments[0].exponent == pytest.approx(1.0, abs=0.05)
@@ -561,7 +567,7 @@ class TestExtractAmplitudeScaling:
     def test_from_scan(self, piecewise_scan):
         scan, _ = piecewise_scan
         result = extract_amplitude_scaling(
-            scan, index_ranges=[(0, 29), (30, 59)],
+            scan, index_ranges=[(0, 29), (30, 59)], intensity="height",
         )
         assert isinstance(result, AmplitudeScalingResult)
         assert result.track is not None
@@ -584,7 +590,7 @@ class TestExtractAmplitudeScaling:
         )
         with pytest.warns(UserWarning, match="non-positive amplitude"):
             result = extract_amplitude_scaling(
-                track, index_ranges=[(0, 9)],
+                track, index_ranges=[(0, 9)], intensity="height",
             )
         assert isinstance(result, AmplitudeScalingResult)
 
@@ -743,3 +749,187 @@ class TestTrackMultiPeakEnergies:
             track_multi_peak_energies(
                 scan, seeds=[1.72], x_range=(1.60, 1.80),
             )
+
+
+# ---------------------------------------------------------------------------
+# Integrated peak areas
+# ---------------------------------------------------------------------------
+
+class TestPeakAreas:
+
+    @staticmethod
+    def _integrate(fn):
+        from scipy.integrate import quad
+        return quad(fn, -np.inf, np.inf, limit=500)[0]
+
+    def test_lorentzian_area(self):
+        num = self._integrate(lambda x: lorentzian(x, 3.0, 0.0, 0.01))
+        assert lorentzian_area(3.0, 0.01) == pytest.approx(num, rel=1e-6)
+
+    def test_gaussian_area(self):
+        num = self._integrate(lambda x: gaussian(x, 3.0, 0.0, 0.01))
+        assert gaussian_area(3.0, 0.01) == pytest.approx(num, rel=1e-6)
+
+    @pytest.mark.parametrize("fwhm_g, fwhm_l", [
+        (0.01, 1e-6), (1e-6, 0.01), (0.004, 0.003), (0.002, 0.008),
+    ])
+    def test_voigt_area(self, fwhm_g, fwhm_l):
+        num = self._integrate(
+            lambda x: voigt_approx(x, 3.0, 0.0, fwhm_g, fwhm_l))
+        assert voigt_area(3.0, fwhm_g, fwhm_l) == pytest.approx(num, rel=1e-4)
+
+
+def _power_law_track(sweep, areas, heights):
+    n = len(sweep)
+    return PeakTrack(
+        sweep_values=sweep, sweep_label="Power", sweep_unit="uW",
+        peak_energies=np.full(n, 1.7), peak_amplitudes=heights,
+        peak_errors=np.full(n, np.nan), converged=np.ones(n, dtype=bool),
+        method="multi_voigt+constant", peak_areas=areas,
+    )
+
+
+class TestAmplitudeScalingRangesAndIntensity:
+
+    def test_coord_ranges_in_sweep_units(self):
+        # Regression: coord_ranges used to be matched against log(P).
+        sweep = np.unique(np.concatenate([np.logspace(-1, 2, 30), [3.0, 30.0]]))
+        area = np.where(sweep < 3, sweep**1.0 * 3.0,
+               np.where(sweep <= 30, sweep**2.0, sweep**1.0 * 30.0))
+        track = _power_law_track(sweep, area, area)
+        seg = extract_amplitude_scaling(
+            track, coord_ranges=[(3, 30)]).segments[0]
+        inside = (sweep >= 3) & (sweep <= 30)
+        assert np.array_equal(seg.mask, inside)
+        assert seg.exponent == pytest.approx(2.0, abs=1e-6)
+
+    def test_area_vs_height_with_broadening(self):
+        sweep = np.logspace(0, 2, 20)
+        area  = 10.0 * sweep**1.5
+        width = 0.004 * sweep**0.3            # power broadening
+        height = area / width                 # height ~ area / width
+        track = _power_law_track(sweep, area, height)
+        ranges = [(0, 19)]
+        a = extract_amplitude_scaling(track, index_ranges=ranges)
+        h = extract_amplitude_scaling(track, index_ranges=ranges,
+                                      intensity="height")
+        assert a.intensity == "area" and h.intensity == "height"
+        assert a.segments[0].exponent == pytest.approx(1.5, abs=1e-6)
+        assert h.segments[0].exponent == pytest.approx(1.2, abs=1e-6)
+        assert "intensity: area" in repr(a)
+
+    def test_area_falls_back_to_height_with_warning(self):
+        sweep = np.arange(1.0, 11.0)
+        track = PeakTrack(
+            sweep_values=sweep, sweep_label="Power", sweep_unit="uW",
+            peak_energies=np.full(10, 1.5), peak_amplitudes=sweep**1.5,
+            peak_errors=np.full(10, np.nan), converged=np.ones(10, bool),
+            method="argmax",
+        )
+        with pytest.warns(UserWarning, match="no peak areas"):
+            result = extract_amplitude_scaling(track, index_ranges=[(0, 9)])
+        assert result.intensity == "height"
+        assert result.segments[0].exponent == pytest.approx(1.5, abs=1e-6)
+
+    def test_bad_intensity_raises(self):
+        sweep = np.arange(1.0, 6.0)
+        track = _power_law_track(sweep, sweep, sweep)
+        with pytest.raises(ValueError, match="intensity"):
+            extract_amplitude_scaling(track, index_ranges=[(0, 4)],
+                                      intensity="peak")
+
+    def test_fit_track_has_areas(self, piecewise_scan):
+        scan, _ = piecewise_scan
+        track = track_peak_energies(scan, method="fit")
+        assert track.peak_areas is not None
+        expected = lorentzian_area(track.peak_amplitudes[0], 0.01)
+        assert track.peak_areas[0] == pytest.approx(expected, rel=0.05)
+
+
+# ---------------------------------------------------------------------------
+# track_multi_peak_energies: fixed vs moving center windows
+# ---------------------------------------------------------------------------
+
+def _make_drift_trap_scan(n_sweeps=20):
+    """
+    Two modelled peaks (1.72, 1.68 eV) plus a strong UNMODELLED peak at
+    1.655 eV.  Peak B is absent for the first 10 points, so its component
+    has nothing to hold on to and gets pulled towards the 1.655 eV peak.
+    """
+    energy = np.linspace(1.60, 1.80, 300)
+    spectra = np.empty((300, n_sweeps))
+    for k in range(n_sweeps):
+        b_amp = 0.0 if k < 10 else 50.0
+        spectra[:, k] = (_lorentzian(energy, 80, 1.72, 0.008)
+                         + _lorentzian(energy, b_amp, 1.68, 0.008)
+                         + _lorentzian(energy, 100, 1.655, 0.010))
+    return _MockScan(energy=energy, best_energy_spectra=spectra,
+                     ef=np.arange(1.0, n_sweeps + 1))
+
+
+class TestCenterMode:
+
+    def test_moving_drifts_fixed_does_not(self):
+        scan = _make_drift_trap_scan()
+        kw = dict(seeds=[1.72, 1.68], x_range=(1.60, 1.80), center_tol=0.005)
+        with pytest.warns(UserWarning, match="edge of its"):
+            moving = track_multi_peak_energies(scan, center_mode="moving", **kw)
+        with pytest.warns(UserWarning, match="edge of its"):
+            fixed = track_multi_peak_energies(scan, center_mode="fixed", **kw)
+        # moving walks onto the unmodelled peak; fixed cannot leave its window
+        assert np.nanmin(moving[1].peak_energies) < 1.665
+        assert np.all(np.abs(fixed[1].peak_energies - 1.68) <= 0.005 + 1e-9)
+
+    def test_default_is_moving(self, two_peak_scan):
+        scan, centres_a, _ = two_peak_scan
+        tracks = track_multi_peak_energies(
+            scan, seeds=[1.72, 1.68], x_range=(1.60, 1.80))
+        assert tracks[0].peak_energies == pytest.approx(centres_a, abs=0.005)
+
+    def test_fixed_recovers_clean_peaks_and_areas(self, two_peak_scan):
+        scan, centres_a, centres_b = two_peak_scan
+        tracks = track_multi_peak_energies(
+            scan, seeds=[1.72, 1.68], x_range=(1.60, 1.80),
+            center_mode="fixed", center_tol=[0.025, 0.012])
+        # A drifts +20 meV, B -10 meV; windows wide enough, not overlapping
+        assert tracks[0].peak_energies == pytest.approx(centres_a, abs=0.005)
+        assert tracks[1].peak_energies == pytest.approx(centres_b, abs=0.005)
+        # two_peak_scan: Lorentzians, amp 80 / 50, fwhm 0.01
+        assert tracks[0].peak_areas == pytest.approx(
+            lorentzian_area(80.0, 0.01), rel=0.02)
+        assert tracks[1].peak_areas == pytest.approx(
+            lorentzian_area(50.0, 0.01), rel=0.02)
+
+    def test_per_peak_center_tol(self, two_peak_scan):
+        scan, _, _ = two_peak_scan
+        tracks = track_multi_peak_energies(
+            scan, seeds=[1.72, 1.68], x_range=(1.60, 1.80),
+            center_mode="fixed", center_tol=[0.025, 0.012])
+        assert all(t.converged.all() for t in tracks)
+        assert len(tracks) == 2
+
+    def test_center_tol_wrong_length_raises(self, two_peak_scan):
+        scan, _, _ = two_peak_scan
+        with pytest.raises(ValueError, match="one per peak"):
+            track_multi_peak_energies(
+                scan, seeds=[1.72, 1.68], center_tol=[0.01, 0.01, 0.01])
+
+    def test_bad_center_mode_raises(self, two_peak_scan):
+        scan, _, _ = two_peak_scan
+        with pytest.raises(ValueError, match="center_mode"):
+            track_multi_peak_energies(
+                scan, seeds=[1.72, 1.68], center_mode="anchored")
+
+    def test_overlapping_fixed_windows_warn(self, two_peak_scan):
+        scan, _, _ = two_peak_scan
+        with pytest.warns(UserWarning, match="overlap"):
+            track_multi_peak_energies(
+                scan, seeds=[1.72, 1.68], x_range=(1.60, 1.80),
+                center_mode="fixed", center_tol=0.025)
+
+    def test_offset_seed_hits_edge_warning(self, two_peak_scan):
+        scan, _, _ = two_peak_scan
+        with pytest.warns(UserWarning, match="Peak 0 .*edge of its"):
+            track_multi_peak_energies(
+                scan, seeds=[1.71, 1.68], x_range=(1.60, 1.80),
+                center_mode="fixed", center_tol=0.004)

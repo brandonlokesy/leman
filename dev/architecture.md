@@ -1079,8 +1079,11 @@ What the object then carries:
 | `img_raw` / `img` | the frame as saved / the same array, or its first 2002 rows with `remove_info_bar=True` |
 
 `plot_micrograph` draws `img` and a `matplotlib-scalebar` `ScaleBar` built from
-`pixel_size`; it does no maths of its own. Format facts:
-`dev/instruments/olympus-microscope.md`. The choices and what was rejected: 0041.
+`pixel_size`; it does no maths of its own. `crop=` takes `(rows, columns)` slices,
+draws only those pixels, and passes `imshow` an `extent` that puts them at their
+full-image pixel coordinates, so the y-axis stays inverted and row 0 stays on top.
+Format facts: `dev/instruments/olympus-microscope.md`. The choices and what was
+rejected: 0041; for `crop=`, 0042.
 
 ## `BTSpectralSweep` — what a second instrument costs
 

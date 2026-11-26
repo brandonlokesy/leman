@@ -140,5 +140,6 @@ Ordered by number, which is allocation order — see the `Date` column for chron
 | [0039](0039-an-unnamed-row-beats-a-guessed-one.md) | An unnamed parameter row beats a guessed one, and one signal beats a fictional pair | 2026-08-26 | Accepted |
 | [0040](0040-reference-hdf5-has-a-schema.md) | Reference HDF5 files use a versioned schema with three layouts | 2026-09-17 | Accepted |
 | [0041](0041-a-micrograph-reads-its-own-label.md) | A micrograph reads its magnification from its own label, and an override restates the wrong label | 2026-10-28 | Accepted |
+| [0042](0042-a-micrograph-crop-is-numpy-slices.md) | A micrograph is cropped with one `(rows, columns)` pair of slices | 2026-11-26 | Accepted |
 
 This table is the one mutable part of the folder.
