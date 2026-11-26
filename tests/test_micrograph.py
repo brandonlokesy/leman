@@ -309,6 +309,60 @@ def test_drawing_into_given_axes():
     assert res.ax is ax and res.fig is fig
 
 
+def test_crop_draws_exactly_the_selected_pixels():
+    m = Micrograph(FIFTY)
+    res = plot_micrograph(m, crop=np.s_[200:1400, 500:2000])
+    np.testing.assert_array_equal(res.im.get_array(), m.img[200:1400, 500:2000])
+
+
+def test_crop_keeps_the_full_images_pixel_coordinates_and_row_0_on_top():
+    res = plot_micrograph(Micrograph(FIFTY), crop=np.s_[200:1400, 500:2000])
+    assert res.ax.get_xlim() == pytest.approx((499.5, 1999.5))
+    # Inverted y-axis, as for an uncropped imshow: the top edge is row 200.
+    assert res.ax.get_ylim() == pytest.approx((1399.5, 199.5))
+    assert res.ax.yaxis_inverted()
+
+
+def test_crop_does_not_flip_the_image():
+    # Rendered, not inspected: the top-left screen pixel must be the crop's
+    # top-left image pixel. An upside-down draw would put row 1399 there.
+    m = Micrograph(FIFTY)
+    fig, ax = plt.subplots(figsize=(3, 2.4), dpi=100)
+    fig.subplots_adjust(0, 0, 1, 1)
+    plot_micrograph(m, ax=ax, crop=np.s_[0:1200, 0:1500], scalebar=False)
+    fig.canvas.draw()
+    frame = np.asarray(fig.canvas.buffer_rgba())[..., :3]
+    top = m.img[0:100, 0:1500].mean(axis=(0, 1))
+    bottom = m.img[1100:1200, 0:1500].mean(axis=(0, 1))
+    drawn_top = frame[:20].mean(axis=(0, 1))
+    assert np.abs(drawn_top - top).sum() < np.abs(drawn_top - bottom).sum()
+
+
+def test_crop_resolves_negative_and_open_bounds_as_numpy_does():
+    m = Micrograph(FIFTY)
+    res = plot_micrograph(m, crop=np.s_[-500:, :1000])
+    np.testing.assert_array_equal(res.im.get_array(), m.img[-500:, :1000])
+
+
+def test_the_scale_bar_survives_a_crop_with_the_same_pixel_size():
+    m = Micrograph(FIFTY)
+    res = plot_micrograph(m, crop=np.s_[200:1400, 500:2000], fixed_value=10)
+    assert res.scalebar in res.ax.artists
+    assert res.scalebar.dx == pytest.approx(m.pixel_size)
+    res.fig.canvas.draw()      # the bar is laid out at draw time; it must not raise
+
+
+@pytest.mark.parametrize("crop, match", [
+    ((slice(0, 10),), "two slices"),
+    ([slice(0, 10), slice(0, 10)], "two slices"),
+    ((slice(0, 100, 2), slice(0, 100)), "step"),
+    ((slice(500, 200), slice(0, 100)), "selects no pixels"),
+])
+def test_a_malformed_crop_is_refused(crop, match):
+    with pytest.raises(ValueError, match=match):
+        plot_micrograph(Micrograph(FIFTY), crop=crop)
+
+
 # ---------------------------------------------------------------------------
 # The shipped masks
 # ---------------------------------------------------------------------------

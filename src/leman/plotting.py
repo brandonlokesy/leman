@@ -1732,6 +1732,7 @@ def plot_micrograph(
     ax       = None,
     figsize  : tuple = (6, 5),
     scalebar : bool  = True,
+    crop     : tuple = None,
     **scalebar_kwargs,
 ) -> MicrographPlot:
     """
@@ -1740,6 +1741,10 @@ def plot_micrograph(
     The image is drawn without axes; ``ax.set_axis_on()`` brings the pixel ticks
     back.  The scale bar's length is chosen automatically from the image's pixel
     size unless *fixed_value* is passed.
+
+    A cropped image keeps the full image's pixel coordinates, so the ticks shown by
+    ``ax.set_axis_on()`` read the same row and column numbers as on the uncropped
+    plot.  Row 0 stays at the top.
 
     Parameters
     ----------
@@ -1752,6 +1757,13 @@ def plot_micrograph(
         Size of the new figure in inches.  Ignored when *ax* is given.
     scalebar : bool
         Draw the scale bar.  Default ``True``.
+    crop : tuple of two slices, optional
+        Region to draw, as ``(rows, columns)`` in pixels of :attr:`img` — the
+        order NumPy indexes an image in.  Write it with ``np.s_``:
+        ``crop=np.s_[200:1400, 500:2000]`` draws rows 200–1399 and columns
+        500–1999.  Negative and open-ended bounds behave as in NumPy indexing.
+        A step other than 1 is refused, since it would change the pixel size
+        the scale bar is drawn from.  Default ``None``: the whole image.
     **scalebar_kwargs
         Passed to ``matplotlib_scalebar.scalebar.ScaleBar``: for example
         ``location="lower right"``, ``color="white"``, ``box_alpha=0`` (no
@@ -1768,7 +1780,9 @@ def plot_micrograph(
     ValueError
         If *scalebar* is set and the micrograph's pixel size is unknown — an image
         exported without its info bar, loaded without ``magnification=`` or
-        ``pixel_size=``; or if scale-bar keywords are given with ``scalebar=False``.
+        ``pixel_size=``; or if scale-bar keywords are given with ``scalebar=False``;
+        or if *crop* is not two slices, has a step other than 1, or selects no
+        pixels.
 
     Examples
     --------
@@ -1776,6 +1790,13 @@ def plot_micrograph(
     >>> fig, ax, im, sb = plot_micrograph(
     ...     img, location="lower right", color="white", box_alpha=0,
     ...     font_properties={"size": 24},
+    ... )
+
+    A cropped figure for publication, with a bar of known length and no number
+    next to it (the length goes in the caption):
+
+    >>> fig, ax, im, sb = plot_micrograph(
+    ...     img, crop=np.s_[200:1400, 500:2000], fixed_value=10, scale_loc="none",
     ... )
     """
     if not scalebar and scalebar_kwargs:
@@ -1790,12 +1811,44 @@ def plot_micrograph(
             "scalebar=False."
         )
 
+    img = micrograph.img
+    extent = None
+    if crop is not None:
+        if (not isinstance(crop, tuple) or len(crop) != 2
+                or not all(isinstance(s, slice) for s in crop)):
+            raise ValueError(
+                f"crop= must be two slices, (rows, columns); got {crop!r}. "
+                "Write it as crop=np.s_[row0:row1, col0:col1]."
+            )
+        # slice.indices resolves None and negative bounds against the image's
+        # own size, so (r0, r1) and (c0, c1) are plain non-negative pixel indices.
+        (r0, r1, r_step), (c0, c1, c_step) = (
+            s.indices(n) for s, n in zip(crop, img.shape[:2])
+        )
+        if r_step != 1 or c_step != 1:
+            raise ValueError(
+                f"crop= has a step ({r_step}, {c_step}); only a step of 1 is "
+                "accepted, since skipping pixels would make the scale bar wrong."
+            )
+        if r1 <= r0 or c1 <= c0:
+            raise ValueError(
+                f"crop={crop!r} selects no pixels of a {img.shape[0]} x "
+                f"{img.shape[1]} image (rows x columns)."
+            )
+        img = img[r0:r1, c0:c1]
+        # The cropped array is drawn where it sat in the full image: pixel
+        # centres stay on integers, so each edge sits half a pixel out.  With
+        # imshow's default origin="upper", extent's (bottom, top) = (r1, r0) keeps
+        # row r0 at the top — the y-axis stays inverted, exactly as for the full
+        # image, which is what set_ylim(low, high) undoes and why it flips.
+        extent = (c0 - 0.5, c1 - 0.5, r1 - 0.5, r0 - 0.5)
+
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
     else:
         fig = ax.get_figure()
 
-    im = ax.imshow(micrograph.img)
+    im = ax.imshow(img, extent=extent)
     ax.set_axis_off()
 
     sb = None
